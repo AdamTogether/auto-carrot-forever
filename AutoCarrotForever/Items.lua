@@ -49,12 +49,13 @@ ns.EQUIP_LOC_SLOTS = {
 ns.TWO_HAND_LOCS = { INVTYPE_2HWEAPON = true }
 
 -- Zone groups (DESIGN.md §5.5): default contents for "<x> areas" item effects.
--- The player can edit them (account-wide). Which zones Blizzard counts as
--- "Desert areas" is not published; Tanaris and Silithus are the safe start.
+-- The player can edit them (account-wide). Blizzard doesn't publish which
+-- zones count as "Desert areas"; Desolace is confirmed in game, Tanaris and
+-- Silithus are the obvious deserts.
 -- Zones are matched by name (and map ID once captured in game), because map
 -- IDs on the Forever client are not known yet.
 ns.ZONE_GROUP_DEFAULTS = {
-    desert = { { name = "Tanaris" }, { name = "Silithus" } },
+    desert = { { name = "Tanaris" }, { name = "Silithus" }, { name = "Desolace" } },
 }
 
 local function zones(...)

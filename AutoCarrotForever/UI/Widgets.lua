@@ -100,7 +100,6 @@ end
 -- Replaced by the real implementations in Settings.lua / ItemList.lua / Buttons.lua.
 function UI.OpenSettings() end
 function UI.OpenZoneGroups() end
-function UI.RefreshZoneGroups() end
 function UI.OpenEditor() end
 function UI.UpdateButtons() end
 function UI.ResetButtons() end

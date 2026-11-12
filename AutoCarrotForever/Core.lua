@@ -261,7 +261,7 @@ end
 --------------------------------------------------------------------------------
 
 local GLOBAL_DEFAULTS = {
-    version = 1,
+    version = 2,
     nextRuleId = 1,
     custom = {},
     ignoredSuggestions = {},
@@ -312,13 +312,27 @@ local function merge(dst, defaults)
     return dst
 end
 
-local MIGRATIONS = {
-    -- [2] = function(db) ... end,
+-- Account-wide DB migrations, by target version.
+local GLOBAL_MIGRATIONS = {
+    -- 2: Desolace counts as a Desert area (confirmed in game). Add it to
+    -- groups saved before it was a default; zones the player removed later
+    -- are not touched again because this runs only once.
+    [2] = function(db)
+        local desert = db.zoneGroups and db.zoneGroups.desert
+        if not desert then return end
+        for _, z in ipairs(desert) do
+            if type(z.name) == "string" and z.name:lower() == "desolace" then return end
+        end
+        table.insert(desert, { name = "Desolace" })
+    end,
 }
 
-local function migrate(db, target)
+-- Per-character DB migrations, by target version.
+local CHAR_MIGRATIONS = {}
+
+local function migrate(db, target, migrations)
     for v = (db.version or 1) + 1, target do
-        if MIGRATIONS[v] then MIGRATIONS[v](db) end
+        if migrations[v] then migrations[v](db) end
         db.version = v
     end
 end
@@ -326,8 +340,8 @@ end
 local function InitDB()
     AutoCarrotForeverGlobalDB = merge(AutoCarrotForeverGlobalDB or {}, GLOBAL_DEFAULTS)
     AutoCarrotForeverDB = merge(AutoCarrotForeverDB or {}, CHAR_DEFAULTS)
-    migrate(AutoCarrotForeverGlobalDB, GLOBAL_DEFAULTS.version)
-    migrate(AutoCarrotForeverDB, CHAR_DEFAULTS.version)
+    migrate(AutoCarrotForeverGlobalDB, GLOBAL_DEFAULTS.version, GLOBAL_MIGRATIONS)
+    migrate(AutoCarrotForeverDB, CHAR_DEFAULTS.version, CHAR_MIGRATIONS)
     ns.gdb = AutoCarrotForeverGlobalDB
     ns.db = AutoCarrotForeverDB
 

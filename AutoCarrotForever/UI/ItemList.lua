@@ -47,7 +47,7 @@ local function CreateWindow()
     end
     f:SetSize(WIDTH, HEIGHT)
     f:SetPoint("CENTER")
-    f:SetFrameStrata("HIGH")
+    f:SetFrameStrata("DIALOG") -- above the options panel when opened from it
     f:SetToplevel(true)
     f:SetClampedToScreen(true)
     f:EnableMouse(true)

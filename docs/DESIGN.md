@@ -156,7 +156,7 @@ AutoCarrotForever/
   Discovery.lua    bag scan + tooltip heuristics for candidate speed items
   UI/Widgets.lua   shared UI helpers (menus with MenuUtil or UIDropDownMenu fallback, tooltips)
   UI/Settings.lua  Settings panel
-  UI/ZoneGroups.lua Zone Groups sub-page (collapsible group/zone lists) (Esc > Options > AddOns)
+  UI/ZoneGroups.lua zone-groups section of the options page (collapsible group/zone lists)
   UI/ItemList.lua  custom item editor + suggestions list
   UI/Buttons.lua   toggle button + minimap button
 ```
@@ -203,7 +203,7 @@ AutoCarrotForeverGlobalDB = {
   },
   ignoredSuggestions = { [67890] = true },             -- itemID or "e:<enchantID>"
   zoneGroups = {                                       -- §5.5; editable, shared by all rules/characters
-    desert = { { name = "Tanaris" }, { name = "Silithus", mapID = 81 } },
+    desert = { { name = "Tanaris" }, { name = "Silithus", mapID = 81 }, { name = "Desolace" } },
   },
 }
 
@@ -325,7 +325,7 @@ Forever adds items that only work in certain zones. The first known one is **The
   - `{ group = "desert" }`: a **zone group**. These are named sets in `AutoCarrotForeverGlobalDB.zoneGroups`, shared by every rule and character, so fixing the desert list once fixes it everywhere.
 - **Current zone:** `C_Map.GetBestMapForUnit("player")`, walked up through parent maps to the zone-level map. That way a sub-zone, building or cave floor counts as its zone. If that fails, `GetRealZoneText()` is used.
 - **Matching:** by map ID when both sides have one, otherwise by zone name (case-insensitive). The defaults are names only, because Forever's map IDs are unknown. Adding the current zone in game stores both, and an existing name-only entry learns its map ID.
-- **Which zones are "Desert areas"?** Blizzard does not list them. The default group is **Tanaris and Silithus**. The player adds or removes zones while standing in them: in the editor's *Where* menu, with the settings buttons, or with `/ac zone add desert`. `/ac speed` shows the current mount speed, so you can see whether the Rose's 7% applies in a zone.
+- **Which zones are "Desert areas"?** Blizzard does not list them. The default group is **Tanaris, Silithus and Desolace**. Desolace was confirmed in game; Tanaris and Silithus are the obvious deserts. Desolace was added after the first build, so a one-time migration (global DB version 2) adds it to desert groups that were already saved, without restoring zones the player removed later. The player adds or removes zones while standing in them: in the editor's *Where* menu, with the settings buttons, or with `/ac zone add desert`. `/ac speed` shows the current mount speed, so you can see whether the Rose's 7% applies in a zone.
 - **Discovery** reads the zone from the tooltip (§7.2): "… in Desert areas" becomes `{ group = "desert" }`, and "… while in Tanaris" becomes that zone. An unknown kind of area, such as "in Snowy areas", creates an empty group named after it. The editor then asks the player to add zones to it.
 - **Leaving the zone** works like any trigger turning off. The normal restore and restore delay apply, and the zone events below trigger a `Refresh()`.
 
@@ -583,45 +583,50 @@ ns.SPEED_PATTERNS = {
 
 ### 8.1 Settings panel (`UI/Settings.lua`)
 
-Location: **Esc → Options → AddOns → AutoCarrot Forever**. Built with `Settings.RegisterVerticalLayoutCategory` and `Settings.RegisterAddOnSetting`, wrapped in `ns.API` because the Settings API signatures have changed between retail versions.
+Location: **Esc → Options → AddOns → AutoCarrot Forever**. A single **canvas page** (`Settings.RegisterCanvasLayoutCategory`) built from plain widgets, with no Settings list rows and no sub-pages, because:
+- the Settings list (vertical layout) cannot hold the collapsible zone-group lists;
+- its button rows showed empty hover boxes on Forever;
+- switching to another settings page from a button threw an error during combat.
+
+Everything lives on this one scrolling page:
 
 | Control | Setting |
 |---|---|
 | Checkbox | Enabled |
-| Multi-checkbox | Turn off in: Dungeons / Raids / Battlegrounds / Arenas / Scenarios |
+| Checkboxes | Turn off inside: Dungeons / Raids / Battlegrounds / Arenas / Scenarios |
 | Section header | Built-in items |
-| Checkbox per built-in | Carrot on a Stick, Riding Skill glove enchant (#930), Mithril Spurs boot enchant (#464) |
+| Checkbox per built-in | Every entry in `ns.BUILTINS`. The weapon ones are off by default |
 | Section header | Behaviour |
-| Dropdown | Preferred trinket slot: Auto / Top (13) / Bottom (14) |
-| Checkboxes | Lock slot: Trinket 1 / Trinket 2 / Ring 1 / Ring 2 (`lockedSlots`) |
-| Dropdown | Trinket slots for speed items: 2 (default) / 1 (§6.5) |
+| Choice (menu) | Trinket slots for speed items: Two (default) / One (§6.5) |
+| Choice (menu) | Preferred trinket slot: Auto / Top (13) / Bottom (14) |
+| Checkboxes | Lock trinket 1 / trinket 2 / ring 1 / ring 2 (`lockedSlots`) |
 | Checkbox | Never swap out on-use trinkets (§6.7) |
-| Sliders (0–5 s, step 0.5) | Restore delay: Mounted / Swimming / Submerged |
-| Section header | Zone groups |
-| Button | *Edit zone groups*: opens the **Zone Groups** page (below) |
+| Stepper `< 1.0 s >` (0–5 s, step 0.5) | Restore delay: mounted / swimming / underwater |
 | Section header | Interface |
 | Checkbox | Show toggle button |
-| Slider (0.5–2.0, step 0.1) | Toggle button scale |
+| Stepper (0.5–2.0, step 0.1) | Toggle button scale |
 | Checkbox | Show minimap button |
 | Checkbox | Show speed-item suggestions in chat |
-| Button | Reset button positions |
+| Button | Button positions: Reset |
+| Button | Custom items: Open item editor (§8.2) |
 | Checkbox | Debug messages |
+| Section header | **Zone groups** (inline, last because its height changes) |
 
-Every change calls `ns.Engine:Refresh()` and `ns.UI:Update()`. **The panel must open in combat** (reading settings is allowed). Changes made in combat are saved at once, but only take effect once combat ends, like everything else.
+Steppers replace sliders, because slider templates differ between client versions. Every change calls `ns.Engine:OnSettingsChanged()`, which refreshes the engine and the buttons. The page re-reads all values when shown and on `AC_STATUS`, so slash-command changes show up. **Using the page in combat is safe:** nothing on it switches settings pages or touches protected frames. Changes are saved at once and take effect when the engine's guards allow (§6.6). `UI.OpenSettings` (minimap Shift-click, `/ac options`) refuses politely in combat instead of calling `Settings.OpenToCategory`.
 
-**Zone Groups page** (`UI/ZoneGroups.lua`, a canvas sub-page under AutoCarrot Forever, next to Custom Items). It replaces per-group button rows, because Forever's settings button rows showed empty hover boxes and couldn't list zones:
+**Zone groups section** (`UI/ZoneGroups.lua`, `UI.CreateZoneGroupsSection`, embedded at the bottom of the page):
 
 - The top line shows the player's current zone and which groups it belongs to.
 - Each group is a **collapsible row**: +/- or a click on its name opens it. The row shows the zone count and "you are here", and its tooltip lists the zones and the rules that use the group. Each row has two buttons:
   - **Add current zone** or **Remove current zone**
   - **Defaults** (built-in groups: adds back removed default zones) or **Delete** (custom groups no rule uses)
 - An open group lists its zones, each with its map ID once known, a "you are here" marker and an **X** to remove it.
-- At the bottom, **New group** creates "<name> areas" groups (for example "Snowy" becomes *Snowy areas*), to pick under *Where* in the item editor.
-- The page refreshes on zone changes and on any rule or group change.
+- Below the list, **New group** creates "<name> areas" groups (for example "Snowy" becomes *Snowy areas*), to pick under *Where* in the item editor.
+- The section reports its height back to the page whenever groups open or close, so the page scrolls correctly. It refreshes on zone changes and on any rule or group change.
 
 ### 8.2 Custom item editor (`UI/ItemList.lua`)
 
-A canvas subcategory, **AutoCarrot Forever → Custom Items**. The same frame can open on its own (`/ac` or a right-click on the minimap button) as a movable window built on `PortraitFrameTemplate`. It closes with Esc (`tinsert(UISpecialFrames, …)`).
+A movable window (`BasicFrameTemplateWithInset`, strata `DIALOG` so it sits above the options panel). It opens with `/ac`, a right-click on the minimap or toggle button, or the options page's *Open item editor* button. It closes with Esc (`tinsert(UISpecialFrames, …)`).
 
 ```
 ┌ Custom Items (account-wide) ──────────────────────────────────────────────────┐
@@ -835,7 +840,7 @@ The rule-choice logic (`AssignSlots`, excludes, priority, the never-save-a-speed
 5. **Distribution:** publish as "AutoCarrot Forever" on CurseForge or Wago? Check the license and permission with the original author, kebabstorm.
 6. **Sharing rules:** add an export/import string for custom rules later, so players can share newly found items?
 
-7. **Desert areas:** which zones count? The default is Tanaris and Silithus. Check with `/ac speed` while mounted in other dry zones (Badlands, Desolace, Thousand Needles, Durotar, the Barrens) and fix the group with `/ac zone add|remove desert`.
+7. **Desert areas:** which zones count? The default is Tanaris, Silithus and **Desolace (confirmed in game)**. Check with `/ac speed` while mounted in other dry zones (Badlands, Thousand Needles, Durotar, the Barrens) and fix the group with `/ac zone add|remove desert`.
 8. **Rider of the Plaguelands pieces:** names, IDs and sources are unknown. Once found: `/ac addset 2 <links> mounted` (§5.6), and consider making it a built-in.
 9. **Enchant Boots - Speed:** which enchant ID does it put on boots? With that ID it can become a built-in like Mithril Spurs. Is it live or PTR-only?
 10. **`C_LootJournal.GetItemSetItems`:** does it return the pieces of Forever's new sets? If not, set suggestions fall back to `/ac addset` (§7.2).
@@ -854,7 +859,7 @@ Where the first build differs from the sections above, and why:
 
 - **No inventory cache.** `Refresh()` scans bags and equipment every time it runs. It only runs on events and on changes to polled triggers, never every frame, so the cost is small and stale-cache bugs are impossible.
 - **Rule lists use a plain `ScrollFrame`** with rows created as needed, not `ScrollBox`/`DataProvider`. The custom list is short, and `UIPanelScrollFrameTemplate` exists on every client version.
-- **The editor is its own window.** The *Custom Items* settings sub-page holds a button that opens it, so the same UI is never parented in two places.
+- **The editor is its own window.** It opens from a button on the options page; there are no settings sub-pages (§8.1).
 - **Built-in items that are not soulbound** are never equipped automatically. The player is asked once to equip the item by hand to bind it. Custom rules use the per-rule *Allow binding* box (§6.6).
 - **Unbound items with permission** are equipped through `EquipItemByName`, so the client shows its own bind confirmation. Everything else uses the bag-location path (§6.2).
 - **Usability in the engine is checked by required level only.** Class and armor-type problems are caught by the failure back-off (§6.6). The editor uses the full check (`C_PlayerInfo.CanUseItem`) to grey out rows.
@@ -863,3 +868,4 @@ Where the first build differs from the sections above, and why:
 - **Missing 3.01 items:** Riding Crop, Skybreaker Whip, the swim belt and the swim helm are not in Forever. → Removed from the built-ins (§3.4). An item named "Riding Gloves" exists but gives no speed, so rules match enchant and item IDs only, never names.
 - **Zone-limited items:** The Desert Rose (274648) gives +7% mount speed in Desert areas. → Built-in with a zone condition. Zone groups added (§5.5).
 - **More Forever speed gear** (research, 2026-11-11): Wintersaber Hide Lined Gloves, Agamaggan's Clutch, the Blessing of Kalimdor set and three two-handed weapons. → New built-ins (§3.4). Weapon support (§6.9) and set rules (§5.6) added.
+- **Desert areas:** Desolace counts (tested in game). → Added to the default desert group, with a migration for existing settings (§5.5).

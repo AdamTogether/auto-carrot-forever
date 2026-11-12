@@ -4,7 +4,7 @@ A WoW: Forever (1.60.1, interface 16001) fork of **AutoCarrot 3.01** by **kebabs
 
 It equips movement-speed gear automatically and puts your normal gear back when you no longer need it:
 
-- **Zone-limited speed:** The Desert Rose (+7% mount speed in Desert areas) is worn only in desert zones. Nobody knows the exact list of desert zones yet. The default is Tanaris and Silithus, and you can add more in game with `/ac zone add desert` (`/ac speed` shows whether the bonus applies where you are). Your own items can be limited to zones the same way.
+- **Zone-limited speed:** The Desert Rose (+7% mount speed in Desert areas) is worn only in desert zones. Blizzard doesn't publish the list of desert zones. The default is Tanaris, Silithus and Desolace (Desolace is confirmed in game), and you can add more in game with `/ac zone add desert` (`/ac speed` shows whether the bonus applies where you are). Your own items can be limited to zones the same way.
 - **Other Forever zone items, built in:**
   - Wintersaber Hide Lined Gloves (+6% while mounted, in Winterspring)
   - Agamaggan's Clutch (+3% in The Barrens, Thousand Needles and the Razorfen dungeons)

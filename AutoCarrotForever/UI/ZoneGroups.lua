@@ -2,14 +2,12 @@ local ADDON, ns = ...
 
 local UI, API = ns.UI, ns.API
 
--- Options > AddOns > AutoCarrot Forever > Zone Groups (DESIGN.md §8.1).
--- A plain canvas page: every group is a collapsible list of its zones.
+-- The "Zone groups" section of the main options page (DESIGN.md §8.1): every
+-- group is a collapsible list of its zones. It is a plain frame embedded in
+-- the page, so nothing here switches settings pages (which is blocked in
+-- combat).
 
 local ROW_H = 26
-local panel, subcategory
-local expanded = {}   -- [group key] = true while open (per session)
-local rows = {}
-
 local GREY, GREEN = "|cff999999", "|cff40ff40"
 
 local function zoneText(z)
@@ -20,7 +18,7 @@ end
 -- Rows: one pooled frame type, configured as a group header or a zone line
 --------------------------------------------------------------------------------
 
-local function CreateRow(parent)
+local function CreateRow(section, parent)
     local row = CreateFrame("Frame", nil, parent)
     row:SetHeight(ROW_H)
 
@@ -28,13 +26,13 @@ local function CreateRow(parent)
     row.toggle:SetSize(16, 16)
     row.toggle:SetPoint("LEFT", 4, 0)
     row.toggle:SetScript("OnClick", function()
-        expanded[row.key] = not expanded[row.key]
-        UI.RefreshZoneGroups()
+        section.expanded[row.key] = not section.expanded[row.key]
+        section:Refresh()
     end)
 
     row.labelHit = CreateFrame("Button", nil, row)
     row.labelHit:SetPoint("LEFT", 26, 0)
-    row.labelHit:SetPoint("RIGHT", row, "RIGHT", -300, 0)
+    row.labelHit:SetPoint("RIGHT", row, "RIGHT", -270, 0)
     row.labelHit:SetHeight(ROW_H)
     row.label = row.labelHit:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
     row.label:SetAllPoints()
@@ -42,13 +40,13 @@ local function CreateRow(parent)
     row.label:SetWordWrap(false)
     row.labelHit:SetScript("OnClick", function()
         if row.kind == "group" then
-            expanded[row.key] = not expanded[row.key]
-            UI.RefreshZoneGroups()
+            section.expanded[row.key] = not section.expanded[row.key]
+            section:Refresh()
         end
     end)
     UI.SetTooltip(row.labelHit, function(tt)
+        local E = ns.Engine
         if row.kind == "group" then
-            local E = ns.Engine
             tt:SetText(E:GroupLabel(row.key), 1, 1, 1)
             local zones = E:GroupZones(row.key)
             if #zones == 0 then
@@ -68,28 +66,25 @@ local function CreateRow(parent)
                 tt:AddLine("Matched by name. Its map ID is recorded the next time you add it while standing in it.", 0.6, 0.6, 0.6, true)
             end
         else
-            return
+            tt:SetText("Stand in a zone where the item works and press Add current zone.", 1, 1, 1, 1, true)
         end
     end)
 
     row.button1 = UI.CreateButton(row, "", 150, function()
         if row.action1 then row.action1() end
     end)
-    row.button1:SetPoint("RIGHT", row, "RIGHT", -110, 0)
+    row.button1:SetPoint("RIGHT", row, "RIGHT", -96, 0)
 
-    row.button2 = UI.CreateButton(row, "", 100, function()
+    row.button2 = UI.CreateButton(row, "", 88, function()
         if row.action2 then row.action2() end
     end)
     row.button2:SetPoint("RIGHT", row, "RIGHT", -4, 0)
 
     row.remove = UI.CreateButton(row, "X", 24, function()
-        if row.kind == "zone" then
-            ns.Engine:RemoveGroupZone(row.key, row.index)
-        end
+        if row.kind == "zone" then ns.Engine:RemoveGroupZone(row.key, row.index) end
     end)
     row.remove:SetPoint("RIGHT", row, "RIGHT", -4, 0)
     UI.SetTooltip(row.remove, "Remove this zone from the group.")
-
     return row
 end
 
@@ -100,13 +95,13 @@ local function setToggle(row, open)
     row.toggle:SetHighlightTexture("Interface\\Buttons\\UI-PlusButton-Hilight", "ADD")
 end
 
-local function FillGroupRow(row, key, zone)
+local function FillGroupRow(section, row, key, zone)
     local E = ns.Engine
     local zones = E:GroupZones(key)
     local here = zone and E:IsInGroup(key, zone)
     row.kind, row.key = "group", key
     row.toggle:Show()
-    setToggle(row, expanded[key])
+    setToggle(row, section.expanded[key])
     row.labelHit:SetPoint("LEFT", 26, 0)
     row.label:SetFontObject("GameFontNormal")
     row.label:SetText(E:GroupLabel(key) .. "  " .. GREY .. "(" .. #zones .. (#zones == 1 and " zone" or " zones") .. ")|r" ..
@@ -122,18 +117,15 @@ local function FillGroupRow(row, key, zone)
         row.action1 = function() E:ToggleCurrentZone(zones, true) end
     end
 
-    row.action2 = nil
+    row.button2:Show()
     if ns.ZONE_GROUP_DEFAULTS[key] then
         row.button2:SetText("Defaults")
         row.button2:SetEnabled(true)
         row.action2 = function() E:RestoreGroupDefaults(key) end
-        row.button2:Show()
     else
-        local inUse = #E:RulesUsingGroup(key) > 0
         row.button2:SetText("Delete")
-        row.button2:SetEnabled(not inUse)
+        row.button2:SetEnabled(#E:RulesUsingGroup(key) == 0)
         row.action2 = function() E:DeleteGroup(key) end
-        row.button2:Show()
     end
     row.remove:Hide()
 end
@@ -157,18 +149,20 @@ local function FillEmptyRow(row, key)
     row.toggle:Hide()
     row.labelHit:SetPoint("LEFT", 44, 0)
     row.label:SetFontObject("GameFontDisable")
-    row.label:SetText("No zones yet. Stand in one and press Add current zone.")
+    row.label:SetText("No zones yet.")
     row.button1:Hide()
     row.button2:Hide()
     row.remove:Hide()
 end
 
 --------------------------------------------------------------------------------
--- Refresh
+-- Section
 --------------------------------------------------------------------------------
 
-function UI.RefreshZoneGroups()
-    if not panel or not panel:IsVisible() then return end
+local Section = {}
+
+function Section:Refresh()
+    if not self:IsVisible() then return end
     local E = ns.Engine
     local zone = API.GetCurrentZone()
 
@@ -176,130 +170,106 @@ function UI.RefreshZoneGroups()
     for _, key in ipairs(E:GroupKeys()) do
         if zone and E:IsInGroup(key, zone) then inGroups[#inGroups + 1] = E:GroupLabel(key) end
     end
-    panel.current:SetText("You are in: " .. (zone and ("|cffffffff" .. zone.name .. "|r") or "unknown") ..
+    self.current:SetText("You are in: " .. (zone and ("|cffffffff" .. zone.name .. "|r") or "unknown") ..
         "   " .. GREY .. (#inGroups > 0 and ("(in " .. table.concat(inGroups, ", ") .. ")") or "(not in any group)") .. "|r")
 
     local n = 0
     local function nextRow()
         n = n + 1
-        local row = rows[n]
+        local row = self.rows[n]
         if not row then
-            row = CreateRow(panel.child)
-            rows[n] = row
+            row = CreateRow(self, self.list)
+            self.rows[n] = row
         end
         row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", 0, -(n - 1) * ROW_H)
-        row:SetPoint("RIGHT", panel.child, "RIGHT", 0, 0)
+        row:SetPoint("TOPLEFT", self.list, "TOPLEFT", 0, -(n - 1) * ROW_H)
+        row:SetPoint("RIGHT", self.list, "RIGHT", 0, 0)
         row:Show()
         return row
     end
-
     for _, key in ipairs(E:GroupKeys()) do
-        FillGroupRow(nextRow(), key, zone)
-        if expanded[key] then
+        FillGroupRow(self, nextRow(), key, zone)
+        if self.expanded[key] then
             local zones = E:GroupZones(key)
-            if #zones == 0 then
-                FillEmptyRow(nextRow(), key)
-            end
-            for i, z in ipairs(zones) do
-                FillZoneRow(nextRow(), key, i, z, zone)
-            end
+            if #zones == 0 then FillEmptyRow(nextRow(), key) end
+            for i, z in ipairs(zones) do FillZoneRow(nextRow(), key, i, z, zone) end
         end
     end
-    for i = n + 1, #rows do rows[i]:Hide() end
-    panel.child:SetHeight(math.max(1, n * ROW_H))
+    for i = n + 1, #self.rows do self.rows[i]:Hide() end
+    self.list:SetHeight(math.max(1, n * ROW_H))
+
+    local descHeight = self.desc:GetStringHeight()
+    if not descHeight or descHeight < 1 then descHeight = 40 end
+    local height = descHeight + 10 + 20 + 8 + n * ROW_H + 12 + 26
+    self:SetHeight(height)
+    if self.onResize then self.onResize(height) end
 end
 
---------------------------------------------------------------------------------
--- Panel
---------------------------------------------------------------------------------
+-- Builds the section inside `parent`. onResize(height) is called whenever its
+-- height changes (groups expanded or collapsed, zones added or removed).
+function UI.CreateZoneGroupsSection(parent, onResize)
+    local section = CreateFrame("Frame", nil, parent)
+    for k, v in pairs(Section) do section[k] = v end
+    section.rows, section.expanded, section.onResize = {}, {}, onResize
 
-local function Build()
-    panel = CreateFrame("Frame")
-
-    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("Zone Groups")
-
-    local desc = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
-    desc:SetPoint("RIGHT", panel, "RIGHT", -16, 0)
-    desc:SetJustifyH("LEFT")
-    desc:SetText("Some Forever items only work in certain zones, such as The Desert Rose in Desert areas. " ..
+    section.desc = section:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    section.desc:SetPoint("TOPLEFT", 0, 0)
+    section.desc:SetPoint("RIGHT", section, "RIGHT", 0, 0)
+    section.desc:SetJustifyH("LEFT")
+    section.desc:SetText("Some Forever items only work in certain zones, such as The Desert Rose in Desert areas. " ..
         "Blizzard doesn't list which zones count, so stand in a zone where the bonus works " ..
         "(check with /ac speed while mounted) and add it here. Groups are shared by all your characters.")
 
-    panel.current = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    panel.current:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -12)
-    panel.current:SetPoint("RIGHT", panel, "RIGHT", -16, 0)
-    panel.current:SetJustifyH("LEFT")
+    section.current = section:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    section.current:SetPoint("TOPLEFT", section.desc, "BOTTOMLEFT", 0, -10)
+    section.current:SetPoint("RIGHT", section, "RIGHT", 0, 0)
+    section.current:SetJustifyH("LEFT")
+    section.current:SetHeight(20)
 
-    local scroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", panel.current, "BOTTOMLEFT", -4, -10)
-    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -30, 52)
-    local child = CreateFrame("Frame", nil, scroll)
-    child:SetSize(1, 1)
-    scroll:SetScrollChild(child)
-    scroll:SetScript("OnSizeChanged", function(self, width) child:SetWidth(width) end)
-    panel.child = child
+    section.list = CreateFrame("Frame", nil, section)
+    section.list:SetPoint("TOPLEFT", section.current, "BOTTOMLEFT", 0, -8)
+    section.list:SetPoint("RIGHT", section, "RIGHT", 0, 0)
+    section.list:SetHeight(1)
 
     -- New group
-    local label = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    label:SetPoint("BOTTOMLEFT", 16, 22)
+    local label = section:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    label:SetPoint("TOPLEFT", section.list, "BOTTOMLEFT", 4, -16)
     label:SetText("New group:")
-    local input = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
-    input:SetSize(160, 22)
+    local input = CreateFrame("EditBox", nil, section, "InputBoxTemplate")
+    input:SetSize(150, 22)
     input:SetPoint("LEFT", label, "RIGHT", 12, 0)
     input:SetAutoFocus(false)
-    local message = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    local message = section:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     local function create()
         local key, err = ns.Engine:CreateGroup(input:GetText())
         if key then
-            expanded[key] = true
+            section.expanded[key] = true
             input:SetText("")
             input:ClearFocus()
             message:SetText(GREEN .. ns.Engine:GroupLabel(key) .. " created. Pick it under Where in the item editor.|r")
         else
             message:SetText("|cffff5050" .. err .. "|r")
         end
-        UI.RefreshZoneGroups()
+        section:Refresh()
     end
     input:SetScript("OnEnterPressed", create)
     input:SetScript("OnEscapePressed", input.ClearFocus)
-    local createButton = UI.CreateButton(panel, "Create", 80, create)
+    local createButton = UI.CreateButton(section, "Create", 80, create)
     createButton:SetPoint("LEFT", input, "RIGHT", 8, 0)
     UI.SetTooltip(createButton, "Type a kind of area, e.g. Snowy, to create \"Snowy areas\".")
     message:SetPoint("LEFT", createButton, "RIGHT", 12, 0)
-    message:SetPoint("RIGHT", panel, "RIGHT", -16, 0)
+    message:SetPoint("RIGHT", section, "RIGHT", 0, 0)
     message:SetJustifyH("LEFT")
 
-    panel:SetScript("OnShow", function()
+    section:SetScript("OnShow", function(self)
         message:SetText("")
-        child:SetWidth(scroll:GetWidth())
-        UI.RefreshZoneGroups()
+        self:Refresh()
     end)
-    return panel
+
+    local function refresh() section:Refresh() end
+    ns:On("AC_RULES", refresh)
+    ns:On("ZONE_CHANGED_NEW_AREA", refresh)
+    ns:On("ZONE_CHANGED", refresh)
+    ns:On("ZONE_CHANGED_INDOORS", refresh)
+    return section
 end
-
-function UI.OpenZoneGroups()
-    if subcategory and Settings and Settings.OpenToCategory then
-        Settings.OpenToCategory(subcategory:GetID())
-    else
-        ns.Print("The options panel is not available on this client; use /ac zone.")
-    end
-end
-
-ns:On("AC_LOADED", function()
-    local category = UI.settingsCategory
-    if not (category and Settings and Settings.RegisterCanvasLayoutSubcategory) then return end
-    local ok, err = pcall(function()
-        subcategory = Settings.RegisterCanvasLayoutSubcategory(category, Build(), "Zone Groups")
-    end)
-    if not ok then ns.Debug("Zone Groups page: " .. tostring(err)) end
-end)
-
-local function refresh() UI.RefreshZoneGroups() end
-ns:On("AC_RULES", refresh)
-ns:On("ZONE_CHANGED_NEW_AREA", refresh)
-ns:On("ZONE_CHANGED", refresh)
-ns:On("ZONE_CHANGED_INDOORS", refresh)
