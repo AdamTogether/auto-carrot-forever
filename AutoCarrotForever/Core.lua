@@ -114,6 +114,10 @@ function API.PickupBagItem(bag, slot)
     return PickupContainerItem(bag, slot)
 end
 
+function API.CanEquipByName()
+    return (C_Item and C_Item.EquipItemByName or EquipItemByName) ~= nil
+end
+
 function API.EquipItemByName(item, slot)
     if C_Item and C_Item.EquipItemByName then
         return C_Item.EquipItemByName(item, slot)
@@ -246,10 +250,14 @@ end
 
 -- Movement speed as a percentage of normal run speed (7 yards/s).
 function API.GetSpeedPercent()
-    local current, run, flight, swim = GetUnitSpeed("player")
     local base = BASE_MOVEMENT_SPEED or 7
-    local function pct(v) return v and math.floor(v / base * 100 + 0.5) or 0 end
-    return pct(current), pct(run), pct(flight), pct(swim)
+    local function pct(v)
+        if type(v) ~= "number" or API.IsSecret(v) then return 0 end
+        return math.floor(v / base * 100 + 0.5)
+    end
+    local ok, current, run, _, swim = pcall(GetUnitSpeed, "player") -- 4th return (flight) unused: no flying in Forever
+    if not ok then return 0, 0, 0 end
+    return pct(current), pct(run), pct(swim)
 end
 
 function API.IsSecret(value)
@@ -261,7 +269,7 @@ end
 --------------------------------------------------------------------------------
 
 local GLOBAL_DEFAULTS = {
-    version = 2,
+    version = 4,
     nextRuleId = 1,
     custom = {},
     ignoredSuggestions = {},
@@ -269,11 +277,11 @@ local GLOBAL_DEFAULTS = {
 }
 
 local CHAR_DEFAULTS = {
-    version = 1,
+    version = 2,
     enabled = true,
     instanceTypes = { party = false, raid = false, pvp = false, arena = false, scenario = false },
     wasAutoDisabled = false,
-    restoreDelay = { mounted = 0, flying = 0, swimming = 1.0, submerged = 1.0, resting = 0, always = 0 },
+    restoreDelay = { mounted = 0, swimming = 1.0, submerged = 1.0, resting = 0, always = 0 },
     trinketSlot = "auto",
     speedTrinketSlots = 2,
     lockedSlots = {},
@@ -312,23 +320,38 @@ local function merge(dst, defaults)
     return dst
 end
 
--- Account-wide DB migrations, by target version.
+-- Adds a zone to a saved group unless it is already there.
+local function addDefaultZone(db, key, name)
+    local group = db.zoneGroups and db.zoneGroups[key]
+    if not group then return end
+    for _, z in ipairs(group) do
+        if type(z.name) == "string" and z.name:lower() == name:lower() then return end
+    end
+    table.insert(group, { name = name })
+end
+
+-- Account-wide DB migrations, by target version. Each runs once, so a zone
+-- the player removes afterwards stays removed.
 local GLOBAL_MIGRATIONS = {
-    -- 2: Desolace counts as a Desert area (confirmed in game). Add it to
-    -- groups saved before it was a default; zones the player removed later
-    -- are not touched again because this runs only once.
-    [2] = function(db)
-        local desert = db.zoneGroups and db.zoneGroups.desert
-        if not desert then return end
-        for _, z in ipairs(desert) do
-            if type(z.name) == "string" and z.name:lower() == "desolace" then return end
+    -- 2: Desolace counts as a Desert area (confirmed in game).
+    [2] = function(db) addDefaultZone(db, "desert", "Desolace") end,
+    -- 3: Westfall counts as a Desert area (confirmed in game).
+    [3] = function(db) addDefaultZone(db, "desert", "Westfall") end,
+    -- 4: the Flying trigger was removed (no flying in Forever).
+    [4] = function(db)
+        for _, c in ipairs(db.custom or {}) do
+            if c.triggers then c.triggers.flying = nil end
         end
-        table.insert(desert, { name = "Desolace" })
     end,
 }
 
 -- Per-character DB migrations, by target version.
-local CHAR_MIGRATIONS = {}
+local CHAR_MIGRATIONS = {
+    -- 2: the Flying trigger was removed (no flying in Forever).
+    [2] = function(db)
+        if db.restoreDelay then db.restoreDelay.flying = nil end
+    end,
+}
 
 local function migrate(db, target, migrations)
     for v = (db.version or 1) + 1, target do
@@ -411,6 +434,7 @@ local function printHelp()
     ns.Print("  /ac button 0|1|reset|scale <n>")
     ns.Print("  /ac debug 0|1 (" .. onOff(db.debug) .. ")")
     ns.Print("  Triggers: " .. table.concat(ns.TRIGGER_ORDER, ", "))
+    ns.Print("  /ac speed - current movement speed (to test zone items)")
 end
 
 local function handleSlash(msg)
@@ -536,9 +560,9 @@ local function handleSlash(msg)
         end
         ns.Print("Usage: /ac zone add <group> | /ac zone remove <group>")
     elseif cmd == "speed" then
-        local current, run, flight, swim = API.GetSpeedPercent()
-        ns.Print(string.format("Speed now %d%%  (ground %d%%, flying %d%%, swimming %d%%). Mounted standing still: ground shows mount speed.",
-            current, run, flight, swim))
+        local current, run, swim = API.GetSpeedPercent()
+        ns.Print(string.format("Speed now %d%%  (ground %d%%, swimming %d%%). Mounted standing still: ground shows mount speed.",
+            current, run, swim))
     elseif cmd == "debug" then
         if tonumber(args[1]) then db.debug = tonumber(args[1]) == 1 else db.debug = not db.debug end
         ns.Print("'debug' = " .. onOff(db.debug))
@@ -594,7 +618,7 @@ local function slashTaken(command)
             local i = 1
             local value = _G["SLASH_" .. key .. i]
             while value do
-                if value:lower() == command then return true end
+                if type(value) == "string" and value:lower() == command then return true end
                 i = i + 1
                 value = _G["SLASH_" .. key .. i]
             end

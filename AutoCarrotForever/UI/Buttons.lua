@@ -26,6 +26,63 @@ local function hints(tt, kind)
     end
 end
 
+-- Live speed readout (same numbers as /ac speed). Ground speed is what
+-- mount-speed items change, so it is the number to watch when testing zones.
+local function speedLines(tt)
+    local current, ground, swim = ns.API.GetSpeedPercent()
+    tt:AddLine(" ")
+    tt:AddDoubleLine("Current speed", current .. "%", 1, 0.82, 0, 1, 1, 1)
+    tt:AddDoubleLine(IsMounted() and "Mounted speed" or "Run speed", ground .. "%", 1, 0.82, 0, 1, 1, 1)
+    if IsSwimming() then
+        tt:AddDoubleLine("Swim speed", swim .. "%", 1, 0.82, 0, 1, 1, 1)
+    end
+end
+
+--------------------------------------------------------------------------------
+-- Hover tooltip shared by the toggle, minimap and compartment buttons.
+-- The speed lines are refreshed every 0.5 s, and only while the tooltip is
+-- showing for one of our buttons: the ticker starts on enter and is cancelled
+-- on leave (or as soon as the tooltip belongs to someone else).
+--------------------------------------------------------------------------------
+
+local HOVER_INTERVAL = 0.5
+local hover -- { owner, kind, ticker }
+
+local function fillTooltip(kind)
+    GameTooltip:ClearLines()
+    statusTooltip(GameTooltip)
+    speedLines(GameTooltip)
+    hints(GameTooltip, kind)
+    GameTooltip:Show()
+end
+
+local function stopHover()
+    if hover then
+        hover.ticker:Cancel()
+        hover = nil
+    end
+end
+
+-- kind: "toggle" | "minimap" | "compartment"
+local function startHover(owner, kind, anchor)
+    stopHover()
+    GameTooltip:SetOwner(owner, anchor)
+    fillTooltip(kind)
+    hover = { owner = owner, kind = kind }
+    hover.ticker = C_Timer.NewTicker(HOVER_INTERVAL, function()
+        if not hover or GameTooltip:GetOwner() ~= owner or not GameTooltip:IsShown() then
+            stopHover()
+            return
+        end
+        fillTooltip(kind)
+    end)
+end
+
+local function endHover()
+    stopHover()
+    GameTooltip:Hide()
+end
+
 local function onClick(button, minimapButton)
     if minimapButton and IsShiftKeyDown() then
         UI.OpenSettings()
@@ -119,13 +176,8 @@ local function CreateToggle()
         if IsAltKeyDown() then return end -- Alt is reserved for moving
         onClick(button, false)
     end)
-    b:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        statusTooltip(GameTooltip)
-        hints(GameTooltip, "toggle")
-        GameTooltip:Show()
-    end)
-    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    b:SetScript("OnEnter", function(self) startHover(self, "toggle", "ANCHOR_RIGHT") end)
+    b:SetScript("OnLeave", endHover)
     return b
 end
 
@@ -188,13 +240,8 @@ local function CreateMinimap()
         end)
     end)
     b:SetScript("OnDragStop", function(self) self:SetScript("OnUpdate", nil) end)
-    b:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        statusTooltip(GameTooltip)
-        hints(GameTooltip, "minimap")
-        GameTooltip:Show()
-    end)
-    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    b:SetScript("OnEnter", function(self) startHover(self, "minimap", "ANCHOR_LEFT") end)
+    b:SetScript("OnLeave", endHover)
     return b
 end
 
@@ -253,12 +300,9 @@ function AutoCarrotForever_OnCompartmentClick(_, button)
 end
 
 function AutoCarrotForever_OnCompartmentEnter(_, frame)
-    GameTooltip:SetOwner(frame, "ANCHOR_LEFT")
-    statusTooltip(GameTooltip)
-    hints(GameTooltip, "compartment")
-    GameTooltip:Show()
+    startHover(frame, "compartment", "ANCHOR_LEFT")
 end
 
 function AutoCarrotForever_OnCompartmentLeave()
-    GameTooltip:Hide()
+    endHover()
 end

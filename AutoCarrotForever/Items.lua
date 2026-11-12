@@ -50,12 +50,12 @@ ns.TWO_HAND_LOCS = { INVTYPE_2HWEAPON = true }
 
 -- Zone groups (DESIGN.md §5.5): default contents for "<x> areas" item effects.
 -- The player can edit them (account-wide). Blizzard doesn't publish which
--- zones count as "Desert areas"; Desolace is confirmed in game, Tanaris and
--- Silithus are the obvious deserts.
+-- zones count as "Desert areas"; Desolace and Westfall are confirmed in game,
+-- Tanaris and Silithus are the obvious deserts.
 -- Zones are matched by name (and map ID once captured in game), because map
 -- IDs on the Forever client are not known yet.
 ns.ZONE_GROUP_DEFAULTS = {
-    desert = { { name = "Tanaris" }, { name = "Silithus" }, { name = "Desolace" } },
+    desert = { { name = "Tanaris" }, { name = "Silithus" }, { name = "Desolace" }, { name = "Westfall" } },
 }
 
 local function zones(...)
@@ -97,6 +97,12 @@ ns.BUILTINS = {
     { id = "blessingOfKalimdor", name = "Blessing of Kalimdor (2-piece set)", kind = "set", need = 2,
       pieces = { { itemID = 285330 }, { itemID = 285331 }, { itemID = 285329 } }, -- ring, neck, cloak
       trigger = "always", priority = 100, zones = zones("The Barrens", "Stonetalon Mountains") },
+    -- "(2) Set: Increases movement speed while mounted by 5% in Eastern and Western Plaguelands."
+    -- Pieces listed ring, cloak, sword so the planner prefers the two armor
+    -- pieces (no weapon swap) when all three are owned.
+    { id = "riderOfThePlaguelands", name = "Rider of the Plaguelands (2-piece set)", kind = "set", need = 2,
+      pieces = { { itemID = 284102 }, { itemID = 284100 }, { itemID = 284101 } }, -- ring, cloak, 1h sword
+      trigger = "mounted", priority = 100, zones = zones("Eastern Plaguelands", "Western Plaguelands") },
     -- Two-handed weapons: "Movement speed increased by 2% in ..."
     { id = "staffOfWestfall", name = "Staff of Westfall (two-hand)", match = { itemID = 2042 }, slots = { 16 },
       twoHand = true, defaultOff = true, trigger = "always", priority = 100,

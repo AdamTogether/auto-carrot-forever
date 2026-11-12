@@ -258,7 +258,9 @@ local function ruleName(c)
         return "|cff1eff00Set|r " .. c.need .. " of: " .. table.concat(names, ", "), nil
     end
     if c.match.enchantID then
-        return "Enchant: " .. (c.label or ("#" .. c.match.enchantID)), c.link
+        -- Labels come from the tooltip line, e.g. "Enchanted: Minor Speed".
+        local label = c.label and c.label:gsub("^[Ee]nchanted:%s*", "")
+        return "Enchant: " .. (label or ("#" .. c.match.enchantID)), c.link
     end
     local name, link, quality = API.GetItemInfo(c.match.itemID)
     if not name then

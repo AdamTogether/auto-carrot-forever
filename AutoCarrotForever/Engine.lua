@@ -21,10 +21,6 @@ ns.TRIGGERS = {
         label = "Mounted",
         test = function() return IsMounted() and not UnitOnTaxi("player") end,
     },
-    flying = {
-        label = "Flying", polled = true,
-        test = function() return IsFlying ~= nil and IsFlying() end,
-    },
     swimming = {
         label = "Swimming", polled = true,
         test = function() return IsSwimming() end,
@@ -43,7 +39,7 @@ ns.TRIGGERS = {
         test = function() return true end,
     },
 }
-ns.TRIGGER_ORDER = { "mounted", "flying", "swimming", "submerged", "resting", "always" }
+ns.TRIGGER_ORDER = { "mounted", "swimming", "submerged", "resting", "always" }
 
 --------------------------------------------------------------------------------
 -- Runtime state (never saved)
@@ -67,6 +63,9 @@ local state = {
     warned = {},            -- one-shot chat warnings
     bindAsked = {},         -- [ruleId] = true once the client asked to bind
     expectChange = {},      -- [slot] = time until which an equipment change there is our own side effect
+    useCursor = false,      -- EquipItemByName was blocked: equip via the cursor instead
+    equipBlocked = false,   -- every equip method was blocked by the client
+    unequipBlocked = false, -- PickupInventoryItem was blocked: can't empty a slot
 }
 Engine.state = state
 
@@ -234,7 +233,8 @@ function Engine:RuleLabel(rule)
         return (c.label or "Set") .. " (" .. (c.need or 2) .. " of: " .. table.concat(names, ", ") .. ")"
     end
     if c.match and c.match.enchantID then
-        return "enchant " .. (c.label or ("#" .. c.match.enchantID))
+        local label = c.label and c.label:gsub("^[Ee]nchanted:%s*", "")
+        return "enchant " .. (label or ("#" .. c.match.enchantID))
     end
     local itemID = c.match and c.match.itemID
     local name, link = API.GetItemInfo(itemID or 0)
@@ -244,6 +244,8 @@ end
 --------------------------------------------------------------------------------
 -- Inventory
 --------------------------------------------------------------------------------
+
+local REAGENT_BAG = Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag or 5
 
 function Engine:ScanInventory()
     local inv = { bags = {}, equipped = {}, free = {} }
@@ -259,7 +261,7 @@ function Engine:ScanInventory()
                     item.isBound, item.isLocked = info.isBound, info.isLocked
                     inv.bags[#inv.bags + 1] = item
                 end
-            elseif (family or 0) == 0 then
+            elseif (family or 0) == 0 and bag ~= REAGENT_BAG then
                 inv.free[#inv.free + 1] = { bag = bag, slot = slot }
             end
         end
@@ -316,7 +318,7 @@ end
 -- Guards (DESIGN.md §6.6)
 --------------------------------------------------------------------------------
 
-local BLOCKING_FRAMES = { "MerchantFrame", "MailFrame", "TradeFrame", "BankFrame", "LootFrame", "GuildBankFrame" }
+local BLOCKING_FRAMES = { "MerchantFrame", "MailFrame", "TradeFrame", "BankFrame", "BankPanel", "LootFrame", "GuildBankFrame" }
 
 local function isCasting()
     local ok, casting = pcall(function()
@@ -338,13 +340,17 @@ function Engine:IsDisarmed()
 end
 
 function Engine:Blocker()
+    if state.equipBlocked then return "restricted" end
     if InCombatLockdown() or UnitAffectingCombat("player") then return "combat" end
     if UnitIsDeadOrGhost("player") then return "dead" end
     if isCasting() then return "casting" end
     if GetCursorInfo() then return "cursor" end
     for _, name in ipairs(BLOCKING_FRAMES) do
         local f = _G[name]
-        if f and f.IsShown and f:IsShown() then return "window" end
+        -- IsVisible, not IsShown: child panels such as the retail BankPanel
+        -- stay "shown" while their parent window is closed, which blocked
+        -- every swap.
+        if f and f.IsVisible and f:IsVisible() then return "window", name end
     end
     return nil
 end
@@ -371,11 +377,18 @@ function Engine:SlotCost(slot, inv, speedWorn)
     local it = inv.equipped[slot]
     if not it or speedWorn[slot] then return 0, false end
     if not API.GetItemSpell(it.itemID) then return 1, false end
-    local start, duration = GetInventoryItemCooldown("player", slot)
+    -- Cooldowns can be secret values on Midnight-engine clients; arithmetic on
+    -- a secret throws, so read them defensively and assume "ready" if unknown.
     local remaining = 0
-    if start and duration and start > 0 and duration > 0 then
-        remaining = math.max(0, start + duration - now())
-    end
+    local ok, value = pcall(function()
+        local start, duration = GetInventoryItemCooldown("player", slot)
+        if API.IsSecret(start) or API.IsSecret(duration) then return 0 end
+        if start and duration and start > 0 and duration > 0 then
+            return math.max(0, start + duration - now())
+        end
+        return 0
+    end)
+    if ok and type(value) == "number" then remaining = value end
     local forbidden = ns.db.neverSwapOnUse and true or false
     if remaining > 30 then return 2, forbidden end
     return 3 + (30 - remaining) / 30, forbidden
@@ -395,18 +408,40 @@ end
 -- Refresh: the single entry point (DESIGN.md §6.1)
 --------------------------------------------------------------------------------
 
+-- Errors inside Refresh are reported once per distinct message instead of on
+-- every event (Forever pauses all Lua error reporting after 100 errors).
+local reportedErrors = {}
+
 function Engine:Refresh()
+    local ok, err = xpcall(function() return Engine:RefreshUnsafe() end, function(e)
+        return tostring(e) .. "\n" .. (debugstack and debugstack(2) or "")
+    end)
+    if not ok then
+        local key = tostring(err):match("^[^\n]*") or "?"
+        if not reportedErrors[key] then
+            reportedErrors[key] = true
+            geterrorhandler()(err)
+        end
+    end
+end
+
+function Engine:RefreshUnsafe()
     if not state.ready or not ns.db then return end
     local db = ns.db
 
     self:BuildRules()
 
-    local blocked = self:Blocker()
+    local blocked, detail = self:Blocker()
+    if blocked ~= state.blocked then
+        ns.Debug(blocked and ("Waiting: " .. blocked .. (detail and (" (" .. detail .. ")") or "")) or "No longer waiting")
+    end
     state.blocked = blocked
     if blocked then
         if blocked == "combat" then
             -- Armor waits for PLAYER_REGEN_ENABLED; weapons go back now (§6.9).
             self:CombatWeaponPass()
+        elseif blocked == "restricted" then
+            -- Nothing to retry until /reload.
         else
             self:RetryLater(1)
         end
@@ -588,6 +623,20 @@ local function equipFromCursor(slot)
     return true
 end
 
+-- Puts a bag item into an equipment slot. C_Item.EquipItemByName with the full
+-- link is the primary method: it picks the exact copy, shows the client's own
+-- bind confirmation, and does not touch the cursor (cursor calls such as
+-- PickupInventoryItem have been reported as forbidden in some contexts on
+-- Forever). The cursor path is the fallback if the client blocks it.
+function Engine:SendEquip(item, slot)
+    if not state.useCursor and API.CanEquipByName() then
+        API.EquipItemByName(item.link, slot)
+        return true
+    end
+    API.PickupBagItem(item.bag, item.slot)
+    return equipFromCursor(slot)
+end
+
 function Engine:EquipRule(rule, slot, inv)
     local db = ns.db
     local item = self:FindInBags(inv, function(it) return Planner.Matches(rule.match, it) end)
@@ -643,15 +692,7 @@ function Engine:EquipRule(rule, slot, inv)
         state.expectChange[d] = now() + 3
     end
 
-    local started
-    if item.isBound then
-        API.PickupBagItem(item.bag, item.slot)
-        started = equipFromCursor(slot)
-    else
-        -- Unbound with permission: let the client show its bind confirmation.
-        API.EquipItemByName(item.link, slot)
-        started = true
-    end
+    local started = self:SendEquip(item, slot)
     if not started then
         self:CountFailure(rule.id, slot)
         return false
@@ -684,6 +725,12 @@ function Engine:Restore(slot, inv)
     if saved == false then
         -- The slot was empty: take the speed item off into the bags.
         if not current then
+            self:ClearSlot(slot)
+            return false
+        end
+        if state.unequipBlocked then
+            self:WarnOnce("unequip", "The game blocked taking items off, so " .. (current.link or "the speed item") ..
+                " stays on. Take it off by hand.")
             self:ClearSlot(slot)
             return false
         end
@@ -739,8 +786,7 @@ function Engine:Restore(slot, inv)
         return false
     end
 
-    API.PickupBagItem(item.bag, item.slot)
-    if not equipFromCursor(slot) then
+    if not self:SendEquip(item, slot) then
         self:CountFailure(nil, slot)
         return false
     end
@@ -848,6 +894,34 @@ function Engine:OnBindConfirm()
         state.inFlight = nil
         ns.Debug("Client asked to confirm binding; waiting for the player")
     end
+end
+
+-- The client refused one of our calls (ADDON_ACTION_FORBIDDEN/BLOCKED).
+-- Switch method where there is an alternative; otherwise stop and say why.
+local CURSOR_FUNCS = { PickupContainerItem = true, EquipCursorItem = true }
+
+function Engine:OnActionBlocked(addon, func)
+    if addon ~= ADDON then return end
+    -- The event reports names like "PickupInventoryItem()" or "C_Item.EquipItemByName()".
+    func = (tostring(func or "?"):gsub("%(%)$", ""))
+    local short = func:match("([%w_]+)$") or func
+    state.inFlight = nil
+    if CursorHasItem() then ClearCursor() end
+    if short == "EquipItemByName" then
+        if state.useCursor then state.equipBlocked = true else state.useCursor = true end
+    elseif CURSOR_FUNCS[short] then
+        if state.useCursor or not API.CanEquipByName() then state.equipBlocked = true end
+    elseif short == "PickupInventoryItem" then
+        state.unequipBlocked = true
+    end
+    if state.equipBlocked then
+        self:WarnOnce("blocked", "The game is blocking addons from equipping items (" .. func ..
+            "), so automatic swaps are off this session. Please report this with your client build.")
+    else
+        self:WarnOnce("blocked:" .. func, "The game blocked " .. func .. "(); switching to another method.")
+    end
+    ns:Fire("AC_STATUS")
+    self:RetryLater(1)
 end
 
 --------------------------------------------------------------------------------
@@ -1210,6 +1284,7 @@ local BLOCK_TEXT = {
     casting = "casting",
     cursor = "item on cursor",
     window = "a trade, mail, vendor, bank or loot window is open",
+    restricted = "the game is blocking addon equipment swaps",
 }
 
 function Engine:StatusLines()
@@ -1258,7 +1333,7 @@ function Engine:PrintRules()
 end
 
 --------------------------------------------------------------------------------
--- Polled triggers (swimming / submerged / flying have no events)
+-- Polled triggers (swimming / submerged have no events)
 --------------------------------------------------------------------------------
 
 local ticker, lastPolled
@@ -1352,6 +1427,9 @@ ns:On("PLAYER_REGEN_DISABLED", function()
     state.blocked = "combat"
     request() -- swap speed weapons back right away (§6.9)
 end)
+
+ns:On("ADDON_ACTION_FORBIDDEN", function(addon, func) Engine:OnActionBlocked(addon, func) end)
+ns:On("ADDON_ACTION_BLOCKED", function(addon, func) Engine:OnActionBlocked(addon, func) end)
 
 ns:On("LOSS_OF_CONTROL_UPDATE", request)
 ns:On("LOSS_OF_CONTROL_ADDED", request)

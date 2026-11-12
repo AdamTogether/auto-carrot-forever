@@ -135,8 +135,9 @@ Results so far:
 | **Blessing of Kalimdor** set (285330 ring, 285331 neck, 285329 cloak): (2) +5% movement speed in The Barrens and Stonetalon Mountains | Yes (item databases) | Built-in **set rule** (§5.6): always + those zones |
 | **Staff of Westfall (2042)**, two-hand: +2% movement speed in Elwynn Forest, Westfall, Redridge Mountains, the Deadmines | Yes (item databases) | Built-in weapon rule, **off by default** (§6.9) |
 | **Forsaken Greataxe (251533)**, **Gnarled Necromancer's Staff (251534)**, two-hand: +2% movement speed in Silverpine Forest and Hillsbrad Foothills | Yes (item databases) | Built-in weapon rules, **off by default** |
-| **Enchant Boots - Speed (289559)**: "+8% movement speed" | Listed, possibly PTR-only | Not built in: the *enchant* ID it applies is unknown. Discovery suggests it once it is on boots |
-| **Rider of the Plaguelands** set: (2) +5% mount speed in Eastern and Western Plaguelands | Set exists, pieces unknown | Add with `/ac addset` once found |
+| **Enchant Boots - Speed (289559)**: "+8% movement speed", and **Enchant Boots - Minor Speed (273530)**: "+4% movement speed" | Listed in item databases (Speed possibly PTR-only) | Not built in: the *enchant* IDs they apply are unknown. Discovery suggests them once they are on boots ("movement speed", "minor speed" patterns) |
+| **Rider of the Plaguelands** set: Signet of the Soulless Rider (284102, ring), Horseman's Unyielding Shroud (284100, cloak), Blade of Senseless Slaughter (284101, one-hand sword). (2) "Increases movement speed while mounted by 5% in Eastern and Western Plaguelands." | Set and pieces in item databases. Drop source not yet reported | Built-in **set rule**: mounted, those zones. The pieces are listed ring, cloak, sword, so the two armor pieces are preferred and no weapon swap is needed |
+| Not equipment, so out of scope: **Gift of Galloping** (271871, +10% mounted speed buff for 15 days), **Swim Speed Potion** (6372), **Transformative Cocoon** (276895, proc-based speed). Druid PvP sets with +15% speed in forms are not mounted speed and are worn permanently anyway | — | Not handled |
 | **The Desert Rose (274648)**, Forever-only: unique trinket, "Equip: Increases mount speed by 7% in Desert areas." | **Yes** (confirmed) | Built-in, mounted **and** in the *Desert areas* zone group (§5.5), priority 110 |
 | Riding Skill glove enchant (930), Mithril Spurs boot enchant (464) | Not yet checked | Built-in, matched by **enchant ID only** |
 
@@ -203,7 +204,7 @@ AutoCarrotForeverGlobalDB = {
   },
   ignoredSuggestions = { [67890] = true },             -- itemID or "e:<enchantID>"
   zoneGroups = {                                       -- §5.5; editable, shared by all rules/characters
-    desert = { { name = "Tanaris" }, { name = "Silithus", mapID = 81 }, { name = "Desolace" } },
+    desert = { { name = "Tanaris" }, { name = "Silithus", mapID = 81 }, { name = "Desolace" }, { name = "Westfall" } },
   },
 }
 
@@ -213,7 +214,7 @@ AutoCarrotForeverDB = {
   enabled = true,
   instanceTypes = { party = false, raid = false, pvp = false, arena = false, scenario = false }, -- true = auto-disable there
   wasAutoDisabled = false,
-  restoreDelay = { mounted = 0, swimming = 1.0, submerged = 1.0, flying = 0 }, -- seconds; see §6.7
+  restoreDelay = { mounted = 0, swimming = 1.0, submerged = 1.0 }, -- seconds; see §6.7
   trinketSlot = "auto",                                -- "auto" | 13 | 14: preferred slot for trinket rules
   speedTrinketSlots = 2,                               -- 2 | 1: max trinket slots speed items may take (§6.5)
   lockedSlots = { },                                   -- [invSlot] = true: never swap this slot (e.g. PvP trinket)
@@ -325,7 +326,7 @@ Forever adds items that only work in certain zones. The first known one is **The
   - `{ group = "desert" }`: a **zone group**. These are named sets in `AutoCarrotForeverGlobalDB.zoneGroups`, shared by every rule and character, so fixing the desert list once fixes it everywhere.
 - **Current zone:** `C_Map.GetBestMapForUnit("player")`, walked up through parent maps to the zone-level map. That way a sub-zone, building or cave floor counts as its zone. If that fails, `GetRealZoneText()` is used.
 - **Matching:** by map ID when both sides have one, otherwise by zone name (case-insensitive). The defaults are names only, because Forever's map IDs are unknown. Adding the current zone in game stores both, and an existing name-only entry learns its map ID.
-- **Which zones are "Desert areas"?** Blizzard does not list them. The default group is **Tanaris, Silithus and Desolace**. Desolace was confirmed in game; Tanaris and Silithus are the obvious deserts. Desolace was added after the first build, so a one-time migration (global DB version 2) adds it to desert groups that were already saved, without restoring zones the player removed later. The player adds or removes zones while standing in them: in the editor's *Where* menu, with the settings buttons, or with `/ac zone add desert`. `/ac speed` shows the current mount speed, so you can see whether the Rose's 7% applies in a zone.
+- **Which zones are "Desert areas"?** Blizzard does not list them. The default group is **Tanaris, Silithus, Desolace and Westfall**. Desolace and Westfall were confirmed in game; Tanaris and Silithus are the obvious deserts. Both confirmed zones were added after the first build, so one-time migrations (global DB version 2 for Desolace, 3 for Westfall) add them to desert groups that were already saved, without restoring zones the player removed later. The player adds or removes zones while standing in them: in the editor's *Where* menu, with the settings buttons, or with `/ac zone add desert`. `/ac speed` shows the current mount speed, so you can see whether the Rose's 7% applies in a zone.
 - **Discovery** reads the zone from the tooltip (§7.2): "… in Desert areas" becomes `{ group = "desert" }`, and "… while in Tanaris" becomes that zone. An unknown kind of area, such as "in Snowy areas", creates an empty group named after it. The editor then asks the player to add zones to it.
 - **Leaving the zone** works like any trigger turning off. The normal restore and restore delay apply, and the zone events below trigger a `Refresh()`.
 
@@ -385,21 +386,23 @@ A slot counts as **managed** if any rule targets it, or if `slotOwner[slot]` is 
 
 **One equip at a time.** Equipping is asynchronous: the item is locked until `PLAYER_EQUIPMENT_CHANGED` / `ITEM_LOCK_CHANGED` fires. So each `Refresh()` starts **at most one** equip or restore. The equipment-change event then triggers the next `Refresh()`, which handles the next slot. This avoids "Item is locked" errors and races between two slots that want the same bag space.
 
-### 6.2 Equipping by bag location
+### 6.2 Equipping
 
-`EquipFromBags(rule, slot)` finds the exact bag slot and then calls `C_Container.PickupContainerItem(bag, bagSlot)` followed by `EquipCursorItem(slot)`. It does **not** use `EquipItemByName`. When two copies differ by enchant or suffix, `EquipItemByName` can pick the wrong one, and it cannot equip "any item with enchant 930".
+The engine first finds the exact bag item: the right copy for an item rule, or any item carrying the enchant for an enchant rule. Then `Engine:SendEquip(item, slot)` does one of two things:
 
-- Before picking up, require an empty cursor (`GetCursorInfo() == nil`). If the player is holding something on the cursor, a pick-up would swap it, so skip and mark the slot dirty.
-- Afterwards, if the cursor is still holding the item (the equip was refused), call `ClearCursor()`. The item returns to its bag slot.
-- `EquipItemByName` stays as a fallback in the `ns.API` wrapper, only for cases the bag-location path cannot handle.
-- **Restoring to an empty slot** (`saved[slot] == false`): `PickupInventoryItem(slot)`, then `PutItemInBackpack()` or `PutItemInBag(firstBagWithSpace)`.
+- **Primary:** `C_Item.EquipItemByName(item.link, slot)`, using the item's **full link**. This picks that exact copy, enchant and suffix included. It shows the client's own bind confirmation for unbound items, and it never touches the cursor. This changed in the v4.0 review: Forever addon developers reported cursor calls such as `PickupInventoryItem` raising `ADDON_ACTION_FORBIDDEN` in some contexts. `EquipItemByName` is also the documented Mainline API, moved to `C_Item` in 10.2.6.
+- **Fallback:** `C_Container.PickupContainerItem` followed by `EquipCursorItem(slot)`. It is used only if the client blocks `EquipItemByName`. It needs an empty cursor, which is a §6.6 guard. If the swap is refused, the item is dropped back with `ClearCursor()` when the flight times out.
+- **Restoring to an empty slot** (`saved[slot] == false`): `PickupInventoryItem(slot)` followed by `PickupContainerItem` into a free slot in a normal bag. The reagent bag is never used, because gear can't go there.
+- **Blocked actions:** `ADDON_ACTION_FORBIDDEN` and `ADDON_ACTION_BLOCKED` for this addon are watched (`Engine:OnActionBlocked`).
+  - If `EquipItemByName` is blocked, the engine switches to the cursor path.
+  - If both paths are blocked, automatic swaps stop for the session (blocker `restricted`) with one chat message, so the game doesn't show repeated "blocked" popups.
+  - If `PickupInventoryItem` is blocked, speed items that went into an empty slot are left on, with a message.
 
 ### 6.3 Triggers
 
 | Key | Condition | Polled? | Notes |
 |---|---|---|---|
 | `mounted` | `IsMounted() and not UnitOnTaxi("player")` | no | Same as 3.01. Druid travel/flight forms and Ghost Wolf are **not** mounts: `IsMounted()` is false, and the Carrot does not affect them anyway. |
-| `flying` | `IsFlying()` | **yes** | Only if Forever has flying (§12) |
 | `swimming` | `IsSwimming()` | **yes** | Also true in Aquatic Form and on swimming mounts |
 | `submerged` | `IsSubmerged()` | **yes** | Same as 3.01 |
 | `resting` | `IsResting()` | no | Speed gear in cities and inns |
@@ -425,7 +428,7 @@ Triggers live in a table, `ns.TRIGGERS[key] = { test = fn, polled = bool, label 
 | `ZONE_CHANGED_NEW_AREA`, `ZONE_CHANGED`, `ZONE_CHANGED_INDOORS` | Zone conditions (§5.5) |
 | `TRADE_CLOSED`, `MAIL_CLOSED`, `MERCHANT_CLOSED`, `LOOT_CLOSED`, `BANKFRAME_CLOSED` | Finish swaps deferred while those windows were open |
 | `UNIT_SPELLCAST_STOP` / `_CHANNEL_STOP` (player) | Finish swaps deferred during a cast |
-| `C_Timer.NewTicker(0.25)` | Checks the **polled** triggers (swimming, submerged, flying), which have no events. It calls `Refresh()` only when a polled state changes. It runs only while at least one enabled rule uses a polled trigger. |
+| `C_Timer.NewTicker(0.25)` | Checks the **polled** triggers (swimming, submerged), which have no events. It calls `Refresh()` only when a polled state changes. It runs only while at least one enabled rule uses a polled trigger. |
 
 There is no `OnUpdate`. Several triggers in the same frame are merged into one `Refresh()` with `C_Timer.After(0, …)`.
 
@@ -462,7 +465,7 @@ When a rule has more than one candidate slot, choose in this order:
 | Dead or ghost | `UnitIsDeadOrGhost("player")` | `PLAYER_ALIVE`, `PLAYER_UNGHOST` |
 | Casting or channeling | `UnitCastingInfo("player") or UnitChannelInfo("player")` | `UNIT_SPELLCAST_STOP` / `_CHANNEL_STOP`. This avoids breaking a hearthstone, fishing or a profession cast |
 | Cursor busy | `GetCursorInfo() ~= nil` | Next `Refresh()` source |
-| Blocked UI | trade, mail, merchant, bank, guild bank or loot window open | Matching `*_CLOSED` event |
+| Blocked UI | trade, mail, merchant, bank, guild bank or loot window **visible** (`IsVisible`, not `IsShown`: the retail `BankPanel` child stays "shown" while the bank is closed, which once blocked every swap) | Matching `*_CLOSED` event |
 | Item locked | `C_Item.IsLocked(location)` on the source or target | `ITEM_LOCK_CHANGED` |
 
 Other safety rules:
@@ -683,6 +686,10 @@ Keeps the 3.01 behaviour, with these changes:
 - Its tooltip lists the active rules, what each slot has swapped in, and any pending or failed state with the reason.
 - If the "Swap now" fallback is ever needed (§6.6), this button becomes a secure button. Its attributes can only be changed out of combat.
 
+**Hover tooltip** (toggle button, minimap button and addon-compartment entry share it):
+- It shows the status lines, then a **live speed readout**: current speed, mounted or run speed, and swim speed while swimming. These are the same numbers as `/ac speed`, from `GetUnitSpeed` and secret-safe, so a zone item can be checked just by hovering.
+- **Polling only while hovered:** `OnEnter` starts a `C_Timer.NewTicker(0.5)` that rebuilds the tooltip. `OnLeave` cancels it, and so does the ticker itself if `GameTooltip` stops being shown or gets a different owner (for example the button was hidden mid-hover). Nothing runs while the mouse is elsewhere.
+
 ### 8.4 Minimap button
 
 Hand-rolled, with no LibDBIcon:
@@ -709,7 +716,7 @@ Hand-rolled, with no LibDBIcon:
 | `/ac lock <slot>` / `unlock <slot>` | Lock or unlock a slot |
 | `/ac zone` | Show the current zone (name and map ID) and every zone group, marking the ones you are in |
 | `/ac zone add\|remove <group>` | Add or remove the current zone in a group, e.g. `/ac zone add desert` |
-| `/ac speed` | Print current, ground, flying and swimming speed in %, to test zone items |
+| `/ac speed` | Print current, ground and swimming speed in %, to test zone items. The same readout is in the button tooltips (§8.3) |
 | `/ac options` | Open the settings panel |
 | `/ac debug 0\|1` | Log decisions (rule chosen, guard that blocked a swap) to chat |
 | `/ac button 0\|1\|reset\|scale <n>` | Same as 3.01 |
@@ -835,13 +842,13 @@ The rule-choice logic (`AssignSlots`, excludes, priority, the never-save-a-speed
 
 1. **Built-in items in Forever:** do the Carrot (11122) and enchants 930 and 464 exist and still give mount speed? Riding Crop, Skybreaker Whip, the swim belt and the swim helm are confirmed missing (§3.4).
 2. **Level cap:** 3.01 stopped the mount swaps above level 70 because the Carrot stops working at higher levels. What is Forever's cap, and do the items have a level limit? The fork removes the hard-coded check. If a limit exists, it becomes a `maxLevel` field on the rule, read from the tooltip where possible.
-3. **Flying:** does Forever have flying mounts? If not, hide the `flying` trigger.
+3. ~~**Flying:**~~ Answered: Forever has no flying mounts. There is no flying trigger (§6.3).
 4. **Weapon swap cost:** does a weapon swap in combat trigger a global cooldown in Forever, and does it reset the swing timer? This decides whether the weapon built-ins should stay off by default (§6.9).
 5. **Distribution:** publish as "AutoCarrot Forever" on CurseForge or Wago? Check the license and permission with the original author, kebabstorm.
 6. **Sharing rules:** add an export/import string for custom rules later, so players can share newly found items?
 
-7. **Desert areas:** which zones count? The default is Tanaris, Silithus and **Desolace (confirmed in game)**. Check with `/ac speed` while mounted in other dry zones (Badlands, Thousand Needles, Durotar, the Barrens) and fix the group with `/ac zone add|remove desert`.
-8. **Rider of the Plaguelands pieces:** names, IDs and sources are unknown. Once found: `/ac addset 2 <links> mounted` (§5.6), and consider making it a built-in.
+7. **Desert areas:** which zones count? The default is Tanaris, Silithus, **Desolace and Westfall (both confirmed in game)**. Check with `/ac speed` while mounted in other dry zones (Badlands, Thousand Needles, Durotar, the Barrens) and fix the group with `/ac zone add|remove desert`.
+8. **Rider of the Plaguelands drop source:** the pieces are now known and built in (§3.4), but nobody has reported where they drop. Plaguelands rares are the likely source.
 9. **Enchant Boots - Speed:** which enchant ID does it put on boots? With that ID it can become a built-in like Mithril Spurs. Is it live or PTR-only?
 10. **`C_LootJournal.GetItemSetItems`:** does it return the pieces of Forever's new sets? If not, set suggestions fall back to `/ac addset` (§7.2).
 
@@ -863,9 +870,17 @@ Where the first build differs from the sections above, and why:
 - **Built-in items that are not soulbound** are never equipped automatically. The player is asked once to equip the item by hand to bind it. Custom rules use the per-rule *Allow binding* box (§6.6).
 - **Unbound items with permission** are equipped through `EquipItemByName`, so the client shows its own bind confirmation. Everything else uses the bag-location path (§6.2).
 - **Usability in the engine is checked by required level only.** Class and armor-type problems are caught by the failure back-off (§6.6). The editor uses the full check (`C_PlayerInfo.CanUseItem`) to grey out rows.
+- **With `/ac debug 1`**, every change in what the engine is waiting for is logged, e.g. "Waiting: window (BankPanel)" or "No longer waiting". This makes a stuck guard easy to spot.
+- **Errors inside `Refresh()`** are reported once per distinct message (`xpcall`), not on every event. Forever pauses all Lua error reporting after 100 errors, which would hide every other addon's errors too.
 - **One-handed weapons** are only placed in the main hand. Offering the off hand would need a dual-wield check.
 - **Hiding unverified built-ins (§3.4)** is not done yet, because nobody has checked which ones exist in Forever. Every built-in is listed.
 - **Missing 3.01 items:** Riding Crop, Skybreaker Whip, the swim belt and the swim helm are not in Forever. → Removed from the built-ins (§3.4). An item named "Riding Gloves" exists but gives no speed, so rules match enchant and item IDs only, never names.
 - **Zone-limited items:** The Desert Rose (274648) gives +7% mount speed in Desert areas. → Built-in with a zone condition. Zone groups added (§5.5).
 - **More Forever speed gear** (research, 2026-11-11): Wintersaber Hide Lined Gloves, Agamaggan's Clutch, the Blessing of Kalimdor set and three two-handed weapons. → New built-ins (§3.4). Weapon support (§6.9) and set rules (§5.6) added.
 - **Desert areas:** Desolace counts (tested in game). → Added to the default desert group, with a migration for existing settings (§5.5).
+- **v4.0 review (2026-11-11):**
+  - Forever developer notes report cursor calls being forbidden in some contexts. → Equipping now goes through `C_Item.EquipItemByName`, with blocked-action detection and fallbacks (§6.2).
+  - Cooldowns and unit values can be secret. → Cooldown and speed reads are made secret-safe.
+  - Forever has no flying mounts. → The Flying trigger was removed entirely. Global DB migration 4 strips it from saved custom rules, and character DB migration 2 removes its restore delay.
+  - The Rider of the Plaguelands pieces were found. → Added as a built-in set.
+- **Desert areas:** Westfall counts (tested in game). → Added to the default desert group, with a migration for existing settings (§5.5).
