@@ -1,0 +1,21 @@
+## Interface: 16001
+## Title: AutoCarrot |cff7fbfffForever|r
+## Notes: Automatically equips movement-speed gear (mount, swim, and custom items)
+## Author: kebabstorm (original), AdamTogether (Forever fork)
+## Version: 4.0.0
+## SavedVariables: AutoCarrotForeverGlobalDB
+## SavedVariablesPerCharacter: AutoCarrotForeverDB
+## IconTexture: 134010
+## AddonCompartmentFunc: AutoCarrotForever_OnCompartmentClick
+## AddonCompartmentFuncOnEnter: AutoCarrotForever_OnCompartmentEnter
+## AddonCompartmentFuncOnLeave: AutoCarrotForever_OnCompartmentLeave
+
+Core.lua
+Items.lua
+Planner.lua
+Engine.lua
+Discovery.lua
+UI\Widgets.lua
+UI\Settings.lua
+UI\ItemList.lua
+UI\Buttons.lua
