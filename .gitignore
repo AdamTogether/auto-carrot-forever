@@ -1,4 +1,2 @@
-# Release zips built for CurseForge
+# Release zips built for CurseForge (the repo-root release zip is tracked on purpose)
 dist/
-AutoCarrot-3.01/
-docs/

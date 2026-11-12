@@ -1,36 +1,72 @@
 # AutoCarrot Forever
 
-A WoW: Forever (1.60.1, interface 16001) fork of **AutoCarrot 3.01** by **kebabstorm**.
+Automatically equips Carrot on a Stick and other mount, swim and zone-speed gear when it helps, then puts your normal gear back.
 
-It equips movement-speed gear automatically and puts your normal gear back when you no longer need it:
+A fork of **[AutoCarrot](https://www.curseforge.com/members/kebabstorm/projects) 3.01 by kebabstorm**, rebuilt for **WoW: Forever** (1.60.1, interface 16001).
 
-- **Zone-limited speed:** The Desert Rose (+7% mount speed in Desert areas) is worn only in desert zones. Blizzard doesn't publish the list of desert zones. The default is Tanaris, Silithus, Desolace and Westfall (Desolace and Westfall are confirmed in game), and you can add more in game with `/ac zone add desert` (`/ac speed` shows whether the bonus applies where you are). Your own items can be limited to zones the same way.
-- **Other Forever zone items, built in:**
-  - Wintersaber Hide Lined Gloves (+6% while mounted, in Winterspring)
-  - Agamaggan's Clutch (+3% in The Barrens, Thousand Needles and the Razorfen dungeons)
-  - the **Blessing of Kalimdor** set: any 2 pieces, +5% in The Barrens and Stonetalon Mountains
-  - the **Rider of the Plaguelands** set: any 2 pieces, +5% while mounted in Eastern and Western Plaguelands. The ring and cloak are preferred over the sword.
-  - the two-handed **Staff of Westfall**, **Forsaken Greataxe** and **Gnarled Necromancer's Staff** (+2% in their zones). These are off by default: in combat your real weapon goes back on at once, which costs a global cooldown.
-- **Sets:** `/ac addset 2 <link> <link> ...` swaps set pieces together, so the bonus is active. Use it for any new speed set you find.
-- **Mount speed:** Carrot on a Stick, plus gloves with the Riding Skill enchant (#930) and boots with the Mithril Spurs enchant (#464). Matching is by enchant, not by item name: Forever's "Riding Gloves" item gives no speed and is not used. Bonuses stack in Forever, so by default two speed trinkets are worn when you have them.
-- **Swimming and underwater:** none of the 3.01 swim items exist in Forever. Add any you find as custom items with the Swimming or Underwater trigger.
-- **Your own items:** add any armor, ring, trinket or cloak (or any item carrying a given enchant). Choose when it is worn (mounted, swimming, underwater, resting or always) and which slot it goes in. Custom items are shared by all your characters.
-- **Suggestions:** items in your bags whose tooltip mentions mount, swim or movement speed are offered as new rules.
+## Features
 
-After combat, the correct gear goes back on as soon as the game allows it.
+- **Automatic swaps.** Speed gear goes on when you mount, swim, dive, or enter a zone where it works. Your normal gear goes back on afterwards, into the same slots.
+- **Combat-aware.**
+  - Armor can't be changed in combat, so swaps wait. Your normal gear returns as soon as the fight ends, even if you were knocked off your mount.
+  - Weapons are swapped back the moment combat starts.
+- **Speed bonuses stack in Forever.** By default the two best speed trinkets are worn together. You can limit this to one.
+- **Gentle on trinket cooldowns.** It swaps out the trinket that costs you least: passive trinkets first, or on-use trinkets already on a long cooldown. You can lock slots, for example to keep a PvP trinket on.
+- **Zone-aware.** Items such as The Desert Rose only work in certain zones. Zone groups (for example *Desert areas*) can be edited in game as players discover which zones count.
+- **Your own items.**
+  - Add any armor, ring, trinket, cloak or weapon, any item carrying a given enchant, or a whole set.
+  - Choose when it's worn (mounted, swimming, underwater, resting or always), which slot it goes in and which zones it works in.
+  - Custom items are shared by all your characters.
+- **Speed-item suggestions.** Items in your bags whose tooltip mentions mount, swim or movement speed are suggested, with **[Add]** links in chat.
+- **Live speed readout.** Hover the minimap or toggle button to see your current, mounted or run, and swim speed. It updates every 0.5 seconds, and only while hovered.
+
+## Built-in items
+
+| Item | Effect | When it's worn |
+|---|---|---|
+| Carrot on a Stick | +3% mount speed | Mounted |
+| The Desert Rose | +7% mount speed | Mounted, in *Desert areas* |
+| Wintersaber Hide Lined Gloves | +6% while mounted | Mounted, in Winterspring |
+| Riding Skill glove enchant (#930), Mithril Spurs boot enchant (#464) | Mount speed | Mounted. Matched by **enchant**, so Forever's plain "Riding Gloves" item (no speed) is never used |
+| Agamaggan's Clutch | +3% movement speed | In The Barrens, Thousand Needles, Razorfen Kraul and Razorfen Downs |
+| Blessing of Kalimdor set (any 2 pieces) | +5% movement speed | In The Barrens and Stonetalon Mountains |
+| Rider of the Plaguelands set (any 2 pieces) | +5% while mounted | Mounted, in Eastern and Western Plaguelands. The ring and cloak are preferred over the sword |
+| Staff of Westfall, Forsaken Greataxe, Gnarled Necromancer's Staff | +2% movement speed in their zones | **Off by default**: putting your real weapon back at the start of a fight costs a global cooldown |
+
+**Desert areas** defaults to Tanaris, Silithus, Desolace and Westfall. Desolace and Westfall are confirmed in game. Blizzard doesn't publish the list, so add or remove zones in the options as you test them.
+
+None of 3.01's Riding Crop, Skybreaker Whip, swim belt or swim helm exist in Forever, and Forever has no flying mounts.
 
 ## Install
 
-Copy the `AutoCarrotForever` folder into `World of Warcraft\_forever_\Interface\AddOns\`. Use the folder for your Forever install if it has a different name.
+- **CurseForge:** install with the CurseForge app.
+- **Manually:** copy the `AutoCarrotForever` folder into `World of Warcraft\_forever_\Interface\AddOns\`. If your Forever install folder has a different name, use that one. The folder must be named `AutoCarrotForever`, matching the `.toc` file, or the game won't load it.
 
 ## Use
 
-- `/ac` opens the custom item editor. `/ac help` lists every command.
-- **Esc → Options → AddOns → AutoCarrot Forever** has all the settings.
-- The minimap button turns the addon on or off with a left-click and opens the editor with a right-click. There is also an optional on/off button you can move with Alt-drag (`/ac button 1`).
+- **Options:** Esc → Options → AddOns → **AutoCarrot Forever**. All settings, including the zone groups, are on one page.
+- **`/ac`** opens the custom item editor. `/ac help` lists every command. Useful ones:
+  - `/ac speed`: your current speed, for testing zone items
+  - `/ac zone`: your zone and the zone groups
+  - `/ac addset 2 <link> <link> …`: add a set rule
+  - `/ac debug 1`: explains every swap decision in chat
+- **Minimap button:**
+  - left-click turns the addon on or off
+  - right-click opens the item editor
+  - Shift-click opens the options
+  - drag to move it around the minimap
+- **Toggle button** (optional, `/ac button 1`): the same clicks. Hold **Alt** and drag to move it; its position is remembered without Edit Mode.
 
 ## Development
 
-- Design: [docs/DESIGN.md](docs/DESIGN.md)
+- Addon source: [AutoCarrotForever/](AutoCarrotForever/)
+- Design document: [docs/DESIGN.md](docs/DESIGN.md)
 - Original addon, for reference: [AutoCarrot-3.01/](AutoCarrot-3.01/)
-- Planner unit tests (plain Lua 5.1+): `lua tests/test_planner.lua`
+- Planner unit tests (plain Lua 5.1+, run from the repo root): `lua tests/test_planner.lua`
+- **Release zips:** the zip must contain the `AutoCarrotForever/` folder at its top level. Bump `## Version` in the `.toc` first. `AutoCarrotForever-<version>.zip` in the repo root is the current release; `dist/` is ignored by git.
+
+## Credits
+
+- **Original addon:** [AutoCarrot](https://www.curseforge.com/members/kebabstorm/projects) by **kebabstorm**. AutoCarrot Forever builds on their original design and code. Please support the original author.
+- **This fork:** AdamTogether, made with the help of AI (Anthropic's Claude). I designed, tested and directed the work; AI assisted with research and writing code.
+- Not affiliated with Blizzard Entertainment.
