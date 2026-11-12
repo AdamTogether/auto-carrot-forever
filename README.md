@@ -70,3 +70,7 @@ None of 3.01's Riding Crop, Skybreaker Whip, swim belt or swim helm exist in For
 - **Original addon:** [AutoCarrot](https://www.curseforge.com/members/kebabstorm/projects) by **kebabstorm**. AutoCarrot Forever builds on their original design and code. Please support the original author.
 - **This fork:** AdamTogether, made with the help of AI (Anthropic's Claude). I designed, tested and directed the work; AI assisted with research and writing code.
 - Not affiliated with Blizzard Entertainment.
+
+## License
+
+[MIT](LICENSE), the same license as the original AutoCarrot. The original copyright notice is kept alongside the fork's.
