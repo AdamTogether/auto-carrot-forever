@@ -66,6 +66,7 @@ local state = {
     blocked = nil,          -- reason the last Refresh could not swap
     warned = {},            -- one-shot chat warnings
     bindAsked = {},         -- [ruleId] = true once the client asked to bind
+    expectChange = {},      -- [slot] = time until which an equipment change there is our own side effect
 }
 Engine.state = state
 
@@ -110,25 +111,41 @@ end
 -- Rules
 --------------------------------------------------------------------------------
 
+local function equipLocOf(itemID)
+    return itemID and select(4, API.GetItemInfoInstant(itemID)) or nil
+end
+
 function Engine:SlotsForCustom(c)
     if type(c.slot) == "number" then return { c.slot } end
-    local loc = c.equipLoc
-    if not loc and c.match.itemID then
-        loc = select(4, API.GetItemInfoInstant(c.match.itemID))
-    end
+    local loc = c.equipLoc or equipLocOf(c.match and c.match.itemID)
     return ns.EQUIP_LOC_SLOTS[loc or ""] or {}
+end
+
+function Engine:IsTwoHand(itemID)
+    return ns.TWO_HAND_LOCS[equipLocOf(itemID) or ""] == true
+end
+
+-- Set pieces: { itemID } -> { match, slots, twoHand } (DESIGN.md §5.6)
+local function buildPieces(list)
+    local pieces = {}
+    for _, p in ipairs(list or {}) do
+        local loc = equipLocOf(p.itemID)
+        pieces[#pieces + 1] = {
+            match = { itemID = p.itemID },
+            slots = ns.EQUIP_LOC_SLOTS[loc or ""] or {},
+            twoHand = ns.TWO_HAND_LOCS[loc or ""] == true,
+        }
+    end
+    return pieces
 end
 
 function Engine:BuildRules()
     local rules, byId, customKeys = {}, {}, {}
     for i, c in ipairs(ns.gdb.custom) do
-        local triggers = c.triggers or {}
         local r = {
             id = "custom:" .. c.id,
             customId = c.id,
-            match = c.match,
-            slots = self:SlotsForCustom(c),
-            triggers = triggers,
+            triggers = c.triggers or {},
             priority = tonumber(c.priority) or 50,
             source = "custom",
             order = i,
@@ -138,18 +155,28 @@ function Engine:BuildRules()
             zones = c.zones,
             entry = c,
         }
+        if c.kind == "set" then
+            r.pieces = buildPieces(c.pieces)
+            r.need = tonumber(c.need) or 2
+        else
+            r.match = c.match
+            r.slots = self:SlotsForCustom(c)
+            r.twoHand = (c.slot == "auto" or c.slot == 16) and self:IsTwoHand(c.match.itemID)
+            if r.enabled then customKeys[Planner.MatchKey(c.match)] = true end
+        end
         rules[#rules + 1] = r
         byId[r.id] = r
-        if r.enabled then customKeys[Planner.MatchKey(c.match)] = true end
     end
     for i, b in ipairs(ns.BUILTINS) do
-        -- A custom rule for the same item or enchant overrides the built-in.
-        local overridden = customKeys[Planner.MatchKey(b.match)]
+        -- A custom item rule for the same item or enchant overrides the built-in.
+        local overridden = false
+        if b.match then overridden = customKeys[Planner.MatchKey(b.match)] == true end
         local r = {
             id = b.id,
             name = b.name,
             match = b.match,
             slots = b.slots,
+            twoHand = b.twoHand,
             triggers = { [b.trigger] = true },
             priority = b.priority,
             excludes = b.excludes,
@@ -159,6 +186,10 @@ function Engine:BuildRules()
             enabled = ns.db.builtins[b.id] ~= false and not overridden,
             overridden = overridden,
         }
+        if b.kind == "set" then
+            r.pieces = buildPieces(b.pieces)
+            r.need = b.need
+        end
         rules[#rules + 1] = r
         byId[r.id] = r
     end
@@ -186,7 +217,7 @@ end
 function Engine:IsSpeedItem(item)
     if not item then return false end
     for _, r in ipairs(state.enabledRules) do
-        if Planner.Matches(r.match, item) then return true end
+        if Planner.RuleMatches(r, item) then return true end
     end
     return false
 end
@@ -194,6 +225,14 @@ end
 function Engine:RuleLabel(rule)
     local c = rule.entry or rule
     if rule.name then return rule.name end
+    if c.kind == "set" then
+        local names = {}
+        for _, p in ipairs(c.pieces or {}) do
+            local name = API.GetItemInfo(p.itemID)
+            names[#names + 1] = name or ("#" .. p.itemID)
+        end
+        return (c.label or "Set") .. " (" .. (c.need or 2) .. " of: " .. table.concat(names, ", ") .. ")"
+    end
     if c.match and c.match.enchantID then
         return "enchant " .. (c.label or ("#" .. c.match.enchantID))
     end
@@ -236,14 +275,30 @@ function Engine:ScanInventory()
     return inv
 end
 
-function Engine:Has(inv, rule)
+function Engine:HasMatch(inv, match)
     for _, it in pairs(inv.equipped) do
-        if Planner.Matches(rule.match, it) then return true end
+        if Planner.Matches(match, it) then return true end
     end
     for _, it in ipairs(inv.bags) do
-        if Planner.Matches(rule.match, it) then return true end
+        if Planner.Matches(match, it) then return true end
     end
     return false
+end
+
+function Engine:Has(inv, rule)
+    if rule.pieces then return #self:UsablePieces(inv, rule) >= (rule.need or 2) end
+    return self:HasMatch(inv, rule.match)
+end
+
+-- Set pieces this character owns and can wear.
+function Engine:UsablePieces(inv, rule)
+    local list = {}
+    for _, p in ipairs(rule.pieces) do
+        if #p.slots > 0 and self:HasMatch(inv, p.match) and API.MeetsLevel(p.match.itemID) then
+            list[#list + 1] = p
+        end
+    end
+    return list
 end
 
 function Engine:FindInBags(inv, test)
@@ -270,6 +325,18 @@ local function isCasting()
     return ok and casting
 end
 
+function Engine:IsDisarmed()
+    if not (C_LossOfControl and C_LossOfControl.GetActiveLossOfControlDataCount) then return false end
+    local ok, disarmed = pcall(function()
+        for i = 1, C_LossOfControl.GetActiveLossOfControlDataCount() do
+            local data = C_LossOfControl.GetActiveLossOfControlData(i)
+            if data and data.locType == "DISARM" then return true end
+        end
+        return false
+    end)
+    return ok and disarmed
+end
+
 function Engine:Blocker()
     if InCombatLockdown() or UnitAffectingCombat("player") then return "combat" end
     if UnitIsDeadOrGhost("player") then return "dead" end
@@ -292,6 +359,7 @@ function Engine:Debounced(slot)
 end
 
 function Engine:CanUse(rule)
+    if rule.pieces then return true end -- checked per piece in UsablePieces
     if rule.match.itemID then
         return API.MeetsLevel(rule.match.itemID)
     end
@@ -336,8 +404,12 @@ function Engine:Refresh()
     local blocked = self:Blocker()
     state.blocked = blocked
     if blocked then
-        -- Combat resumes on PLAYER_REGEN_ENABLED; everything else is polled.
-        if blocked ~= "combat" then self:RetryLater(1) end
+        if blocked == "combat" then
+            -- Armor waits for PLAYER_REGEN_ENABLED; weapons go back now (§6.9).
+            self:CombatWeaponPass()
+        else
+            self:RetryLater(1)
+        end
         ns:Fire("AC_STATUS")
         return
     end
@@ -358,7 +430,15 @@ function Engine:Refresh()
                 and self:CanUse(r)
                 and Planner.ZoneMatches(r.zones, zone, ns.gdb.zoneGroups)
                 and not (r.noInstance and inInstance) then
-                active[#active + 1] = r
+                if r.pieces then
+                    -- Plan with a copy limited to the pieces we can actually wear.
+                    active[#active + 1] = {
+                        id = r.id, name = r.name, pieces = self:UsablePieces(inv, r), need = r.need,
+                        priority = r.priority, source = r.source, order = r.order, allowBind = r.allowBind,
+                    }
+                else
+                    active[#active + 1] = r
+                end
             end
         end
     end
@@ -421,7 +501,7 @@ function Engine:Refresh()
                     return
                 end
             end
-        elseif owner and not state.failed["restore:" .. slot] then
+        elseif owner and not state.failed["restore:" .. slot] and not self:CompanionBlocked(slot, plan) then
             local due = state.restoreAt[slot]
             if state.immediate then
                 due = t
@@ -446,6 +526,40 @@ function Engine:Refresh()
         state.immediate = false
     end
     ns:Fire("AC_STATUS")
+end
+
+--------------------------------------------------------------------------------
+-- Weapons (DESIGN.md §6.9)
+--------------------------------------------------------------------------------
+
+-- A slot whose restore would undo something still wanted: the off hand while a
+-- planned two-hander holds the main hand, or a two-handed normal weapon while a
+-- planned off-hand speed item is worn.
+function Engine:CompanionBlocked(slot, plan)
+    if slot == 17 and plan[16] and plan[16].twoHand then return true end
+    if slot == 16 and plan[17] then
+        local saved = Planner.ParseItemString(ns.db.saved[16])
+        if saved and self:IsTwoHand(saved.itemID) then return true end
+    end
+    return false
+end
+
+-- In combat armor is locked but weapons are not: put the real weapons back at
+-- once, main hand first, one swap per pass (each success triggers the next).
+function Engine:CombatWeaponPass()
+    if state.inFlight or not ns.db then return end
+    if UnitIsDeadOrGhost("player") or isCasting() or GetCursorInfo() then return end
+    if self:IsDisarmed() then
+        self:RetryLater(1)
+        return
+    end
+    local inv
+    for _, slot in ipairs({ 16, 17, 18 }) do
+        if ns.db.slotOwner[slot] and not state.failed["restore:" .. slot] then
+            inv = inv or self:ScanInventory()
+            if self:Restore(slot, inv) then return end
+        end
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -497,16 +611,36 @@ function Engine:EquipRule(rule, slot, inv)
         if state.bindAsked[rule.id] then return false end
     end
 
+    -- Slots the client will empty as a side effect (two-handers, §6.9).
+    local displaced = {}
+    if slot == 16 and rule.twoHand and inv.equipped[17] then
+        displaced[#displaced + 1] = 17
+    elseif slot == 17 and inv.equipped[16] and self:IsTwoHand(inv.equipped[16].itemID) then
+        displaced[#displaced + 1] = 16
+    end
+    if #displaced > 0 and #inv.free == 0 then
+        self:WarnOnce("bagsfull:weapon", "Bags are full, so " .. (item.link or "the speed weapon") ..
+            " can't be equipped (the other hand needs somewhere to go).")
+        return false
+    end
+
     -- Remember the normal item (DESIGN.md §5.1), never a speed item.
-    if not db.slotOwner[slot] then
-        local current = inv.equipped[slot]
+    local function remember(s)
+        if db.slotOwner[s] then return end
+        local current = inv.equipped[s]
         if not current then
-            db.saved[slot] = false
+            db.saved[s] = false
         elseif not self:IsSpeedItem(current) then
-            db.saved[slot] = current.str
-        elseif db.saved[slot] == nil then
-            db.saved[slot] = false
+            db.saved[s] = current.str
+        elseif db.saved[s] == nil then
+            db.saved[s] = false
         end
+    end
+    remember(slot)
+    for _, d in ipairs(displaced) do
+        remember(d)
+        db.slotOwner[d] = rule.id
+        state.expectChange[d] = now() + 3
     end
 
     local started
@@ -690,6 +824,7 @@ end
 -- item into a slot we manage: it becomes the normal item (DESIGN.md §6.6).
 function Engine:CheckManualChange(slot, current)
     if not state.ready then return end
+    if state.expectChange[slot] and now() < state.expectChange[slot] then return end -- our own side effect
     local db = ns.db
     local owner = db.slotOwner[slot]
     local planned = state.plan[slot]
@@ -783,7 +918,7 @@ function Engine:AddCustomRule(spec)
     end
     local slots = ns.EQUIP_LOC_SLOTS[equipLoc]
     if not slots then
-        return nil, "Weapons, off-hands, shirts and tabards are not supported yet."
+        return nil, "Shirts and tabards are not supported."
     end
 
     local match
@@ -830,6 +965,49 @@ function Engine:AddCustomRule(spec)
     return entry
 end
 
+-- spec: { pieces = { link | itemID ... }, need, triggers, zones, label }
+function Engine:AddSetRule(spec)
+    local pieces, seen = {}, {}
+    for _, input in ipairs(spec.pieces or {}) do
+        local parsed = type(input) == "string" and Planner.ParseItemString(input)
+        local itemID = parsed and parsed.itemID or tonumber(input)
+        if not itemID then return nil, "Not an item link or item ID: " .. tostring(input) end
+        local loc = equipLocOf(itemID)
+        if not loc or not ns.EQUIP_LOC_SLOTS[loc] then
+            return nil, "Item " .. itemID .. " can't be used in a set rule (not equippable, or a shirt/tabard)."
+        end
+        if not seen[itemID] then
+            seen[itemID] = true
+            pieces[#pieces + 1] = { itemID = itemID }
+        end
+    end
+    local need = tonumber(spec.need) or 2
+    if #pieces < 2 then return nil, "A set rule needs at least two different items." end
+    if need < 1 or need > #pieces then return nil, "Pieces needed must be between 1 and " .. #pieces .. "." end
+    local gdb = ns.gdb
+    for _, z in ipairs(spec.zones or {}) do
+        if z.group then self:GroupZones(z.group) end
+    end
+    local entry = {
+        id = gdb.nextRuleId,
+        kind = "set",
+        pieces = pieces,
+        need = need,
+        triggers = spec.triggers or { mounted = true },
+        priority = 50,
+        enabled = true,
+        allowBind = false,
+        noInstance = false,
+        zones = spec.zones,
+        label = spec.label,
+    }
+    gdb.nextRuleId = gdb.nextRuleId + 1
+    table.insert(gdb.custom, entry)
+    for _, p in ipairs(pieces) do ns.Discovery:Forget({ itemID = p.itemID }) end
+    self:OnSettingsChanged()
+    return entry
+end
+
 function Engine:FindCustom(id)
     for i, c in ipairs(ns.gdb.custom) do
         if c.id == id then return c, i end
@@ -853,7 +1031,13 @@ function Engine:RemoveCustomRulesMatching(target)
     local ids = {}
     for _, c in ipairs(ns.gdb.custom) do
         local hit
-        if parsed then
+        local probe = parsed or (number and { itemID = number, enchantID = 0 })
+        if c.kind == "set" then
+            for _, p in ipairs(c.pieces) do
+                if probe and p.itemID == probe.itemID then hit = true end
+            end
+            if number and c.id == number then hit = true end
+        elseif parsed then
             hit = c.match.itemID == parsed.itemID
                 or (c.match.enchantID and c.match.enchantID == parsed.enchantID)
         elseif number then
@@ -939,6 +1123,59 @@ end
 
 function Engine:IsInGroup(key, zone)
     return self:FindZone(self:GroupZones(key), zone or API.GetCurrentZone()) ~= nil
+end
+
+function Engine:RemoveGroupZone(key, index)
+    local list = self:GroupZones(key)
+    if list[index] then
+        table.remove(list, index)
+        self:OnSettingsChanged()
+    end
+end
+
+-- "Snowy", "snowy areas" -> key "snowy" (label "Snowy areas").
+function Engine:CreateGroup(name)
+    local key = strtrim((name or ""):lower()):gsub("%s+areas?$", ""):gsub("[^%a%d]+", "_")
+    key = key:gsub("^_+", ""):gsub("_+$", "")
+    if key == "" then return nil, "Type a name, e.g. Snowy." end
+    if ns.gdb.zoneGroups[key] then return nil, self:GroupLabel(key) .. " already exists." end
+    ns.gdb.zoneGroups[key] = {}
+    self:OnSettingsChanged()
+    return key
+end
+
+-- Built-in and custom rules whose zone condition uses this group.
+function Engine:RulesUsingGroup(key)
+    local labels = {}
+    for _, r in ipairs(state.rules) do
+        for _, z in ipairs(r.zones or {}) do
+            if z.group == key then
+                labels[#labels + 1] = self:RuleLabel(r)
+                break
+            end
+        end
+    end
+    return labels
+end
+
+function Engine:DeleteGroup(key)
+    if #self:RulesUsingGroup(key) > 0 then return false end
+    ns.gdb.zoneGroups[key] = nil
+    self:OnSettingsChanged()
+    return true
+end
+
+-- Adds back any default zones that were removed (keeps the player's additions).
+function Engine:RestoreGroupDefaults(key)
+    local defaults = ns.ZONE_GROUP_DEFAULTS[key]
+    if not defaults then return end
+    local list = self:GroupZones(key)
+    for _, z in ipairs(defaults) do
+        if not self:FindZone(list, { name = z.name }) then
+            list[#list + 1] = { name = z.name, mapID = z.mapID }
+        end
+    end
+    self:OnSettingsChanged()
 end
 
 --------------------------------------------------------------------------------
@@ -1113,8 +1350,11 @@ end)
 
 ns:On("PLAYER_REGEN_DISABLED", function()
     state.blocked = "combat"
-    ns:Fire("AC_STATUS")
+    request() -- swap speed weapons back right away (§6.9)
 end)
+
+ns:On("LOSS_OF_CONTROL_UPDATE", request)
+ns:On("LOSS_OF_CONTROL_ADDED", request)
 
 ns:On("PLAYER_EQUIPMENT_CHANGED", function(slot)
     Engine:OnEquipmentChanged(slot)

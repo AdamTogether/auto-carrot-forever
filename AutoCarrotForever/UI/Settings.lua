@@ -91,8 +91,11 @@ local function Build()
     header(layout, "Built-in items")
     for _, b in ipairs(ns.BUILTINS) do
         local where = b.zones and (", only in " .. ns.Engine:ZoneLabel(b.zones)) or ""
-        checkbox("builtin_" .. b.id, b.name, "Swap in " .. b.name .. " (" ..
-            UI.TriggerText({ [b.trigger] = true }):lower() .. where .. ").",
+        local tooltip = "Swap in " .. b.name .. " (" .. UI.TriggerText({ [b.trigger] = true }):lower() .. where .. ")."
+        if b.twoHand then
+            tooltip = tooltip .. " Off by default: the real weapon goes back on as soon as combat starts, which costs a global cooldown at the start of a fight."
+        end
+        checkbox("builtin_" .. b.id, b.name, tooltip,
             function() return db.builtins[b.id] ~= false end,
             function(v) db.builtins[b.id] = v end)
     end
@@ -129,19 +132,9 @@ local function Build()
     end
 
     header(layout, "Zone groups")
-    for _, key in ipairs(ns.Engine:GroupKeys()) do
-        local label = ns.Engine:GroupLabel(key)
-        button(layout, label, "Add current zone",
-            "Items such as The Desert Rose only work in " .. label .. ". Which zones count is not published, so stand in a zone where the item works and add it here. Type /ac zone to see the list.",
-            function()
-                local zone = ns.Engine:ToggleCurrentZone(ns.Engine:GroupZones(key), true)
-                if zone then ns.Print(zone.name .. " added to " .. label .. ".") end
-            end)
-        button(layout, " ", "Remove current zone", nil, function()
-            local zone = ns.Engine:ToggleCurrentZone(ns.Engine:GroupZones(key), false)
-            if zone then ns.Print(zone.name .. " removed from " .. label .. ".") end
-        end)
-    end
+    -- No tooltip text: Forever's settings button rows showed an empty hover box.
+    button(layout, "Zones for zone-limited items", "Edit zone groups", nil,
+        function() UI.OpenZoneGroups() end)
 
     header(layout, "Interface")
     checkbox("button", "Show toggle button", "A movable on/off button (Alt-drag to move).",
@@ -157,13 +150,14 @@ local function Build()
         "Announce bag items whose tooltip mentions mount, swim or movement speed.",
         function() return db.chatSuggestions end,
         function(v) db.chatSuggestions = v end)
-    button(layout, "Button positions", "Reset", "Put both buttons back in their default spots.",
+    button(layout, "Button positions", "Reset", nil,
         function() UI.ResetButtons() end)
     checkbox("debug", "Debug messages", "Explain every swap decision in chat.",
         function() return db.debug end,
         function(v) db.debug = v end)
 
     Settings.RegisterAddOnCategory(category)
+    UI.settingsCategory = category
 
     -- Sub-page that opens the custom item editor window.
     try("Custom Items", function()

@@ -227,6 +227,7 @@ end
 --------------------------------------------------------------------------------
 
 local function ruleSlots(c)
+    if c.kind == "set" then return {} end
     local slots = ns.EQUIP_LOC_SLOTS[c.equipLoc or ""]
     if not slots and c.match.itemID then
         slots = ns.EQUIP_LOC_SLOTS[select(4, API.GetItemInfoInstant(c.match.itemID)) or ""]
@@ -235,6 +236,7 @@ local function ruleSlots(c)
 end
 
 local function slotText(c)
+    if c.kind == "set" then return "Set" end
     if c.slot == "auto" then
         local slots = ruleSlots(c)
         if #slots == 1 then return ns.SLOT_NAMES[slots[1]] or "Auto" end
@@ -244,6 +246,17 @@ local function slotText(c)
 end
 
 local function ruleName(c)
+    if c.kind == "set" then
+        local names = {}
+        for _, p in ipairs(c.pieces) do
+            local name = API.GetItemInfo(p.itemID)
+            if not name then
+                API.LoadItem(p.itemID, function() if editor and editor:IsShown() then UI.RefreshEditor() end end)
+            end
+            names[#names + 1] = name or ("#" .. p.itemID)
+        end
+        return "|cff1eff00Set|r " .. c.need .. " of: " .. table.concat(names, ", "), nil
+    end
     if c.match.enchantID then
         return "Enchant: " .. (c.label or ("#" .. c.match.enchantID)), c.link
     end
@@ -301,7 +314,14 @@ local function CreateRuleRow(parent)
     row.name:SetWordWrap(false)
     UI.SetTooltip(row.nameHit, function(tt)
         local c = row.entry
-        if row.link then
+        if c.kind == "set" then
+            tt:SetText("Set rule: wear " .. c.need .. " of these together", 1, 1, 1)
+            for _, p in ipairs(c.pieces) do
+                local name = API.GetItemInfo(p.itemID)
+                tt:AddLine((name or ("item #" .. p.itemID)), 0.8, 0.8, 0.8)
+            end
+            tt:AddLine("All needed pieces go on together or not at all.", 0.6, 0.8, 1, true)
+        elseif row.link then
             tt:SetHyperlink(row.link)
         elseif c.match.itemID then
             tt:SetItemByID(c.match.itemID)
@@ -354,6 +374,9 @@ local function CreateRuleRow(parent)
         tt:SetText("When this item is worn", 1, 1, 1)
         if row.entry.triggers.always then
             tt:AddLine(ns.TRIGGERS.always.warning, 1, 0.82, 0, true)
+        end
+        if row.isWeapon then
+            tt:AddLine("Weapons: the real weapon goes back on as soon as combat starts (costs a global cooldown), and the speed weapon returns after combat.", 1, 0.82, 0, true)
         end
     end)
 
@@ -414,11 +437,21 @@ local function FillRuleRow(row, c)
     row.link = link or c.link
     row.plainName = name:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
 
-    local iconID = c.match.itemID or (c.link and Planner.ParseItemString(c.link) or {}).itemID
+    local iconID
+    if c.kind == "set" then
+        iconID = c.pieces[1] and c.pieces[1].itemID
+    else
+        iconID = c.match.itemID or (c.link and Planner.ParseItemString(c.link) or {}).itemID
+    end
     row.icon:SetTexture(iconID and API.GetItemIcon(iconID) or 136244)
 
+    row.isWeapon = false
+    for _, slot in ipairs(ruleSlots(c)) do
+        if ns.WEAPON_SLOTS[slot] then row.isWeapon = true end
+    end
+
     row.unusable = nil
-    if c.match.itemID then
+    if c.kind ~= "set" and c.match.itemID then
         local ok, why = API.CanUseItem(c.match.itemID)
         if not ok then row.unusable = why == "level" and "level too low" or "class or armor type" end
     end
@@ -476,6 +509,15 @@ local function CreateSuggestionRow(parent)
 
     row.add = UI.CreateButton(row, "Add", 150, function()
         local s = row.s
+        if s.isSet then
+            local rule, err = ns.Engine:AddSetRule({
+                pieces = s.pieces, need = s.need,
+                triggers = { [s.trigger] = true },
+                zones = s.zones and CopyTable(s.zones) or nil,
+            })
+            setMessage(rule and ("Added set rule #" .. rule.id .. "." .. UI.ZoneNote(rule.zones)) or err, not rule)
+            return
+        end
         local rule, err = ns.Engine:AddCustomRule({
             input = s.link or s.itemID,
             byEnchant = s.byEnchant,
@@ -498,10 +540,16 @@ end
 local function FillSuggestionRow(row, s)
     row.s = s
     row.icon:SetTexture(API.GetItemIcon(s.itemID))
-    local prefix = s.byEnchant and "Enchant on " or ""
+    local prefix = s.byEnchant and "Enchant on " or (s.isSet and "Set with " or "")
     row.name:SetText(prefix .. (s.link or ("Item #" .. s.itemID)))
     row.text:SetText('"' .. s.text .. '"')
-    row.add:SetText("Add as " .. ns.TRIGGERS[s.trigger].label)
+    if s.isSet then
+        row.add:SetText(s.pieces and ("Add set (" .. s.need .. " pieces)") or "Use /ac addset")
+        row.add:SetEnabled(s.pieces ~= nil)
+    else
+        row.add:SetText("Add as " .. ns.TRIGGERS[s.trigger].label)
+        row.add:SetEnabled(true)
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -647,7 +695,9 @@ function UI.OpenEditor(prefill)
     if not editor then Build() end
     editor:Show()
     editor:Raise()
-    if prefill then
+    if prefill and prefill.isSet then
+        setMessage("Set bonus found: use the Add set button in Suggestions below.")
+    elseif prefill then
         resetPending()
         pending.triggers = { [prefill.trigger] = true }
         pending.label = prefill.byEnchant and prefill.text or nil

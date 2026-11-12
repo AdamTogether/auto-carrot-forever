@@ -12,6 +12,8 @@ local LOGIN_QUIET = 5
 -- keyed by GetLocale(); without one, discovery is off and /ac add still works.
 local PATTERNS = {
     enUS = {
+        -- "movement speed while mounted" must win over plain "movement speed".
+        { pattern = "while mounted", trigger = "mounted", kind = "mount speed" },
         { pattern = "mount.- speed", trigger = "mounted", kind = "mount speed" },
         { pattern = "riding speed", trigger = "mounted", kind = "mount speed" },
         { pattern = "swim.- speed", trigger = "swimming", kind = "swim speed" },
@@ -56,7 +58,7 @@ end
 -- Is this item already covered by a rule or ignored?
 local function known(item)
     for _, r in ipairs(ns.Engine.state.rules) do
-        if Planner.Matches(r.match, item) then return true end
+        if Planner.RuleMatches(r, item) then return true end
     end
     local ignored = ns.gdb.ignoredSuggestions
     if ignored["i:" .. item.itemID] then return true end
@@ -64,18 +66,39 @@ local function known(item)
     return false
 end
 
--- Zone limits written on the item, e.g. "... in Desert areas." becomes the
--- zone group "desert"; "... while in Tanaris." becomes that zone.
+-- Zone limits written on the item (DESIGN.md §5.5, §7.2):
+--   "... in Desert areas."              -> zone group "desert"
+--   "... by 3% in The Barrens, ... ."   -> those zones
+--   "... while in Tanaris."             -> that zone
 local function zoneHint(text, lower)
     local area = lower:match(" in ([%a%s']-) areas?%f[^%a]")
     if area then
-        local key = strtrim(area):gsub("%s+", "_")
+        local key = (strtrim(area):gsub("%s+", "_"))
         return { { group = key } }
     end
-    local _, _, name = text:find("[Ww]hile in ([%a%s']+)")
-    if name then
-        return { { name = strtrim(name) } }
+    local list = text:match("%d+%%%s+in%s+(.+)$") or text:match("[Ww]hile in%s+(.+)$")
+    if list then
+        local zones = {}
+        for _, name in ipairs(Planner.SplitZones(list)) do zones[#zones + 1] = { name = name } end
+        if #zones > 0 then return zones end
     end
+end
+
+-- Other pieces of an item's set, when the client can tell us (retail API).
+local function setPieces(link)
+    local setID = select(16, API.GetItemInfo(link))
+    if not setID or setID == 0 then return nil, nil end
+    if C_LootJournal and C_LootJournal.GetItemSetItems then
+        local ok, list = pcall(C_LootJournal.GetItemSetItems, setID)
+        if ok and type(list) == "table" and #list > 0 then
+            local ids = {}
+            for _, e in ipairs(list) do
+                if e.itemID then ids[#ids + 1] = e.itemID end
+            end
+            if #ids > 1 then return setID, ids end
+        end
+    end
+    return setID, nil
 end
 
 -- Reads one tooltip and returns a suggestion or false.
@@ -90,9 +113,32 @@ local function analyse(item, data)
         end
         if type(text) == "string" and text ~= "" then
             local lower = text:lower()
+            local setNeed = lower:match("^%((%d+)%)")
+            local isSetLine = setNeed ~= nil or startsWith(lower, PREFIX_SET)
             local skip = startsWith(lower, PREFIX_USE) or startsWith(lower, PREFIX_PROC)
-                or startsWith(lower, PREFIX_SET) or lower:match("^%(%d+%)")
-            if not skip then
+            if isSetLine and not skip then
+                -- Set bonus (DESIGN.md §5.6): suggest a set rule.
+                for _, p in ipairs(patterns) do
+                    if lower:find(p.pattern) then
+                        local setID, pieces = setPieces(item.link)
+                        local zones = zoneHint(text, lower)
+                        local where = zones and (" (" .. ns.Engine:ZoneLabel(zones) .. ")") or ""
+                        return {
+                            isSet = true,
+                            key = "set:" .. (setID or ("i" .. item.itemID)),
+                            match = { itemID = item.itemID },
+                            need = tonumber(setNeed) or 2,
+                            pieces = pieces,
+                            zones = zones,
+                            itemID = item.itemID,
+                            link = item.link,
+                            text = text,
+                            trigger = p.trigger,
+                            kind = "set-bonus " .. p.kind .. where,
+                        }
+                    end
+                end
+            elseif not skip then
                 for _, p in ipairs(patterns) do
                     if lower:find(p.pattern) then
                         local strong = startsWith(lower, PREFIX_EQUIP)
@@ -139,7 +185,7 @@ local function consider(item, getTooltip)
         end
         cache[item.str] = result
     end
-    if result and not Discovery.suggestions[result.key] then
+    if result and not Discovery.suggestions[result.key] and not ns.gdb.ignoredSuggestions[result.key] then
         Discovery.suggestions[result.key] = result
         order[#order + 1] = result.key
         Discovery:Announce(result)
@@ -196,8 +242,11 @@ function Discovery:Scan(manual)
 end
 
 function Discovery:IsCovered(match)
+    local key = Planner.MatchKey(match)
     for _, r in ipairs(ns.Engine.state.rules) do
-        if Planner.MatchKey(r.match) == Planner.MatchKey(match) then return true end
+        for _, k in ipairs(Planner.RuleKeys(r)) do
+            if k == key then return true end
+        end
     end
     return false
 end
@@ -247,6 +296,12 @@ function Discovery:Announce(s)
     if not ns.db.chatSuggestions or announced[s.key] then return end
     announced[s.key] = true
     local what = s.byEnchant and ("the enchant on " .. (s.link or "an item")) or (s.link or "An item")
+    if s.isSet and not s.pieces then
+        ns.Print(what .. " is part of a set with a " .. s.kind .. ". Add the set with " ..
+            "/ac addset " .. s.need .. " followed by links to the pieces you have. " ..
+            addonLink("ignore", s.key, "Ignore", "ff8080"))
+        return
+    end
     ns.Print(what .. " looks like " .. s.kind .. " gear. " ..
         addonLink("add", s.key, "Add", "40ff40") .. " " .. addonLink("ignore", s.key, "Ignore", "ff8080"))
 end

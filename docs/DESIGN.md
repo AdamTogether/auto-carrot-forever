@@ -130,6 +130,13 @@ Results so far:
 | Riding Crop (25653), Skybreaker Whip (32863) | **No** (confirmed) | Removed |
 | Swim belt (7052), swim helm (10506) | **No** (confirmed) | Removed. The swimming and underwater triggers stay for custom items |
 | Carrot on a Stick (11122) | Assumed yes | Built-in |
+| **Wintersaber Hide Lined Gloves (284266)**, hands, level 54: "Increases movement speed while mounted by 6% in Winterspring." | Yes (item databases) | Built-in: mounted + Winterspring, priority 110 (beats the 2% glove enchant) |
+| **Agamaggan's Clutch (6693)**, ring, level 30: "Increases movement speed by 3% in The Barrens, Thousand Needles, Razorfen Kraul, and Razorfen Downs." | Yes (item databases) | Built-in: always + those zones |
+| **Blessing of Kalimdor** set (285330 ring, 285331 neck, 285329 cloak): (2) +5% movement speed in The Barrens and Stonetalon Mountains | Yes (item databases) | Built-in **set rule** (§5.6): always + those zones |
+| **Staff of Westfall (2042)**, two-hand: +2% movement speed in Elwynn Forest, Westfall, Redridge Mountains, the Deadmines | Yes (item databases) | Built-in weapon rule, **off by default** (§6.9) |
+| **Forsaken Greataxe (251533)**, **Gnarled Necromancer's Staff (251534)**, two-hand: +2% movement speed in Silverpine Forest and Hillsbrad Foothills | Yes (item databases) | Built-in weapon rules, **off by default** |
+| **Enchant Boots - Speed (289559)**: "+8% movement speed" | Listed, possibly PTR-only | Not built in: the *enchant* ID it applies is unknown. Discovery suggests it once it is on boots |
+| **Rider of the Plaguelands** set: (2) +5% mount speed in Eastern and Western Plaguelands | Set exists, pieces unknown | Add with `/ac addset` once found |
 | **The Desert Rose (274648)**, Forever-only: unique trinket, "Equip: Increases mount speed by 7% in Desert areas." | **Yes** (confirmed) | Built-in, mounted **and** in the *Desert areas* zone group (§5.5), priority 110 |
 | Riding Skill glove enchant (930), Mithril Spurs boot enchant (464) | Not yet checked | Built-in, matched by **enchant ID only** |
 
@@ -148,7 +155,8 @@ AutoCarrotForever/
   Engine.lua       trigger evaluation, equip/restore state machine
   Discovery.lua    bag scan + tooltip heuristics for candidate speed items
   UI/Widgets.lua   shared UI helpers (menus with MenuUtil or UIDropDownMenu fallback, tooltips)
-  UI/Settings.lua  Settings panel (Esc > Options > AddOns)
+  UI/Settings.lua  Settings panel
+  UI/ZoneGroups.lua Zone Groups sub-page (collapsible group/zone lists) (Esc > Options > AddOns)
   UI/ItemList.lua  custom item editor + suggestions list
   UI/Buttons.lua   toggle button + minimap button
 ```
@@ -294,14 +302,14 @@ For `slot = "auto"`, the slots come from the item's `itemEquipLoc`, using an exp
 | `INVTYPE_FINGER` | 11, 12 |
 | `INVTYPE_TRINKET` | 13, 14 |
 | `INVTYPE_CLOAK` | 15 |
+| `INVTYPE_WEAPON`, `INVTYPE_WEAPONMAINHAND` | 16 (main hand only; no dual-wield guessing) |
+| `INVTYPE_2HWEAPON` | 16, and it **also takes the off hand** (§6.9) |
+| `INVTYPE_WEAPONOFFHAND`, `INVTYPE_SHIELD`, `INVTYPE_HOLDABLE` | 17 |
+| `INVTYPE_RANGED`, `INVTYPE_RANGEDRIGHT`, `INVTYPE_THROWN`, `INVTYPE_RELIC` | 18 |
 
-**Weapons, off-hands, ranged weapons, shirts and tabards (slots 4, 16–19) are not supported in v1.** They raise problems the armor slots do not:
-- A two-handed weapon also takes the off-hand slot, so restoring would need two saved slots.
-- Ranged and relic slots depend on the version.
-- Weapons **can** be swapped in combat in Forever (confirmed), unless the player is disarmed. Armor and trinkets cannot. Weapon support would therefore need a second, combat-aware code path: swap weapons back *immediately* on entering combat, and handle the disarm state, rather than "wait for combat to end".
-- Speed weapons are rare.
+**Shirts and tabards (slots 4, 19)** are not supported, because they have no stats worth swapping. The editor rejects them with a message.
 
-The editor rejects these items with a message. Supporting them is listed in §12.
+**Weapons are supported** because Forever's zone-speed weapons need it: the Staff of Westfall, Forsaken Greataxe and Gnarled Necromancer's Staff are all two-handers. Weapons follow different combat rules from armor. §6.9 covers that.
 
 **Can the character use it?** Before accepting a rule, the editor checks that this character can wear the item (`C_PlayerInfo.CanUseItem`, or failing that the item's required level and armor type). Unusable items are still accepted, for alts, but are shown greyed out. The engine skips them.
 
@@ -320,6 +328,27 @@ Forever adds items that only work in certain zones. The first known one is **The
 - **Which zones are "Desert areas"?** Blizzard does not list them. The default group is **Tanaris and Silithus**. The player adds or removes zones while standing in them: in the editor's *Where* menu, with the settings buttons, or with `/ac zone add desert`. `/ac speed` shows the current mount speed, so you can see whether the Rose's 7% applies in a zone.
 - **Discovery** reads the zone from the tooltip (§7.2): "… in Desert areas" becomes `{ group = "desert" }`, and "… while in Tanaris" becomes that zone. An unknown kind of area, such as "in Snowy areas", creates an empty group named after it. The editor then asks the player to add zones to it.
 - **Leaving the zone** works like any trigger turning off. The normal restore and restore delay apply, and the zone events below trigger a `Refresh()`.
+
+### 5.6 Set rules
+
+Some Forever speed bonuses are **set bonuses**. Wearing one piece does nothing; wearing two does:
+
+- **Blessing of Kalimdor** (Barrens rares): Signet of the Zhevra (285330, ring), Mark of the Pack Leader (285331, neck), Raptor Hide Cloak (285329, cloak). Its 2-piece bonus is "Increases movement speed by 5% in The Barrens and Stonetalon Mountains."
+- **Rider of the Plaguelands**: 3 pieces, names and sources still unknown. Its 2-piece bonus is "+5% mount speed in Eastern and Western Plaguelands."
+
+A **set rule** swaps several items together:
+
+```lua
+{ id = 9, kind = "set", need = 2,
+  pieces = { { itemID = 285330 }, { itemID = 285331 }, { itemID = 285329 } },
+  triggers = { always = true }, zones = { { name = "The Barrens" }, { name = "Stonetalon Mountains" } },
+  priority = 100, enabled = true, allowBind = false, noInstance = false }
+```
+
+- **Active** when its trigger and zone condition are true **and** this character owns and can use at least `need` pieces.
+- **Planning is all or nothing.** The planner places up to `need` pieces, worn pieces first, so a half-worn set is completed rather than reshuffled. Each piece goes in its own slot, with the usual slot choice for rings and trinkets. If fewer than `need` pieces fit, because other rules or locked slots took their slots, **none** are placed. Half a set gives no bonus and would only cost stats.
+- **Owner and restore:** every slot a set fills is owned by the set rule's id. Restoring works slot by slot, as usual.
+- **Creating sets:** use `/ac addset <need> <link> <link> [...] [trigger]`, or accept a set suggestion (§7.2). Set rules show in the editor as "Set 2 of: A, B, C". Slot is fixed per piece; trigger, zones and priority can be edited like any other rule.
 
 ---
 
@@ -482,6 +511,23 @@ Fixes:
 - **Instances:** `instanceTypes` lets the player choose where the addon turns itself off, by `select(2, IsInInstance())`: dungeons, raids, battlegrounds, arenas and scenarios. The single 3.01 `instance` flag maps to `party` + `raid`. Battlegrounds are listed separately because the Carrot is popular there. On entering a chosen instance type, the addon turns off and sets `wasAutoDisabled`. On leaving, it turns back on only if it was turned off automatically (same logic as 3.01).
 - If the player turns the addon back on inside an instance, `wasAutoDisabled` is cleared. The choice holds until the next loading screen.
 
+### 6.9 Weapons and combat
+
+Weapons follow different rules from armor. **In Forever, weapons can be swapped in combat, unless the player is disarmed.** Armor and trinkets cannot. A 2% speed staff is a bad weapon to fight with, so:
+
+1. **Out of combat**, weapon rules work like any other rule.
+2. **When combat starts** (`PLAYER_REGEN_DISABLED`), `Refresh()` runs a **weapon-only pass** (`CombatWeaponPass`). It immediately restores every owned weapon slot, main hand (16) first, then off hand (17), then ranged (18), one swap at a time. Armor stays as it is until combat ends (§6.6).
+3. The pass waits while the player is **disarmed** (`C_LossOfControl`, `locType == "DISARM"`), retrying every second and on `LOSS_OF_CONTROL_*` events. It also waits while casting, dead or holding something on the cursor.
+4. **After combat** the speed weapon goes back on if its trigger and zone still apply. Each fight therefore costs one weapon swap at the start, and that swap triggers a **global cooldown**. For this reason the weapon built-ins are **off by default**, and the editor and settings tooltips say so.
+
+**Two-handers:**
+
+- **Equipping a two-hander** in the main hand makes the client put the off-hand item into the bags. The engine saves the off hand too (`saved[17]`, `slotOwner[17] = rule`). It needs a free bag slot first; if there is none, it warns once and skips.
+- **Equipping an off-hand speed item** while a two-hander is in the main hand works the same way in reverse: the two-hander is saved as `saved[16]`.
+- **Restoring the other hand would undo the speed weapon.** While the two-hander is still wanted, restoring the off hand is blocked (`CompanionBlocked`). Restoring a saved two-hander is likewise blocked while the off-hand speed item is still wanted. The planner also reserves the off hand while a two-handed rule holds the main hand, so no other rule can claim it.
+- **Restore order:** main hand first, then off hand, because slots are processed in ascending order.
+- **Our own side effects are not manual changes.** The equipment-change events for the displaced hand are expected for 3 seconds (`expectChange[slot]`), so they are not mistaken for the player changing gear by hand (§6.6).
+
 ---
 
 ## 7. Discovery hints (`Discovery.lua`)
@@ -500,11 +546,13 @@ Fixes:
 Read `C_TooltipInfo.GetBagItem(bag, slot)` / `GetInventoryItem("player", slot)` and look at each `lines[i].leftText` (lower-cased).
 
 1. **Only passive effects count.** Lines that start with the localized **Use:** prefix (`ITEM_SPELL_TRIGGER_ONUSE`) or **Chance on hit:** prefix (`ITEM_SPELL_TRIGGER_ONPROC`) are **ignored**. A trinket whose *on-use* effect gives movement speed, such as Nifty Stopwatch or Insignia-style items, gains nothing from being swapped on automatically. Lines with the **Equip:** prefix (`ITEM_SPELL_TRIGGER_ONEQUIP`) are strong matches. Unprefixed green lines (enchant lines such as "Minor Speed" or "Mithril Spurs") are weak matches.
-2. **Set bonuses are ignored** (lines under the "(n) Set:" header). Wearing one piece does not activate them.
+2. **Set-bonus lines** ("(2) Set: …") become **set suggestions** (§5.6). `n` is the number of pieces needed. The pieces come from the item's set ID (`GetItemInfo` return 16 with `C_LootJournal.GetItemSetItems`) when the client provides them. Otherwise the suggestion asks the player to add the set with `/ac addset`.
+2b. **Zone lists** are read from the text after the percentage: "…by 3% in The Barrens, Thousand Needles, Razorfen Kraul, and Razorfen Downs." becomes four zones. "Eastern and Western Plaguelands" becomes "Eastern Plaguelands" and "Western Plaguelands" (`Planner.SplitZones`). "…in Desert areas" becomes a zone group (§5.5). Zone names are compared case-insensitively and ignore a leading "The", and instance names count, so "the Deadmines" matches inside the dungeon.
 3. Patterns:
 
 ```lua
 ns.SPEED_PATTERNS = {
+  { pattern = "while mounted",          trigger = "mounted"   }, -- "movement speed while mounted" must not become "always"
   { pattern = "mount.- speed",          trigger = "mounted"   },
   { pattern = "riding speed",           trigger = "mounted"   },
   { pattern = "swim.- speed",           trigger = "swimming"  },
@@ -550,7 +598,7 @@ Location: **Esc → Options → AddOns → AutoCarrot Forever**. Built with `Set
 | Checkbox | Never swap out on-use trinkets (§6.7) |
 | Sliders (0–5 s, step 0.5) | Restore delay: Mounted / Swimming / Submerged |
 | Section header | Zone groups |
-| Buttons per group | *Desert areas*: Add current zone / Remove current zone (§5.5) |
+| Button | *Edit zone groups*: opens the **Zone Groups** page (below) |
 | Section header | Interface |
 | Checkbox | Show toggle button |
 | Slider (0.5–2.0, step 0.1) | Toggle button scale |
@@ -560,6 +608,16 @@ Location: **Esc → Options → AddOns → AutoCarrot Forever**. Built with `Set
 | Checkbox | Debug messages |
 
 Every change calls `ns.Engine:Refresh()` and `ns.UI:Update()`. **The panel must open in combat** (reading settings is allowed). Changes made in combat are saved at once, but only take effect once combat ends, like everything else.
+
+**Zone Groups page** (`UI/ZoneGroups.lua`, a canvas sub-page under AutoCarrot Forever, next to Custom Items). It replaces per-group button rows, because Forever's settings button rows showed empty hover boxes and couldn't list zones:
+
+- The top line shows the player's current zone and which groups it belongs to.
+- Each group is a **collapsible row**: +/- or a click on its name opens it. The row shows the zone count and "you are here", and its tooltip lists the zones and the rules that use the group. Each row has two buttons:
+  - **Add current zone** or **Remove current zone**
+  - **Defaults** (built-in groups: adds back removed default zones) or **Delete** (custom groups no rule uses)
+- An open group lists its zones, each with its map ID once known, a "you are here" marker and an **X** to remove it.
+- At the bottom, **New group** creates "<name> areas" groups (for example "Snowy" becomes *Snowy areas*), to pick under *Where* in the item editor.
+- The page refreshes on zone changes and on any rule or group change.
 
 ### 8.2 Custom item editor (`UI/ItemList.lua`)
 
@@ -586,7 +644,7 @@ A canvas subcategory, **AutoCarrot Forever → Custom Items**. The same frame ca
   - Type an item ID.
 - **Item or enchant:** if the item that was dropped or linked has an enchant, the **Match** choice appears. "Enchant" makes a rule that matches any item with that enchant, and its slot is fixed to the item's slot.
 - **Checks when adding:**
-  - Unsupported slots (weapons, shirts, tabards): rejected with a message (§5.4).
+  - Unsupported slots (shirts, tabards): rejected with a message (§5.4). Weapon rows get a tooltip warning about the swap at the start of each fight (§6.9).
   - Not equippable: rejected.
   - Same match already has a rule: allowed, because one item may have several rules with different triggers, but an "also used by rule N" note is shown.
   - Same item as a built-in: the note says "overrides built-in X" (§5.3).
@@ -613,7 +671,8 @@ A canvas subcategory, **AutoCarrot Forever → Custom Items**. The same frame ca
 ### 8.3 Toggle button (`UI/Buttons.lua`)
 
 Keeps the 3.01 behaviour, with these changes:
-- `ActionButtonTemplate` with the carrot icon (134010). Alt-drag moves it, and `SetUserPlaced` saves the position. Moving is blocked in combat.
+- A plain `Button` with the carrot icon (134010). It deliberately does **not** use `ActionButtonTemplate`: on Forever that template's scripts swallowed Alt-drag.
+- **Alt + left mouse button moves it.** This is handled in `OnMouseDown`/`OnMouseUp`, not drag events, and the mouse-up that ends a move does not toggle the addon. The position is saved in `AutoCarrotForeverDB.button.pos`, not the client layout cache (`SetUserPlaced(false)`), so Forever's Edit Mode never resets it and the player never needs Edit Mode for it.
 - Green overlay when on, red when off, **yellow when a swap is pending** (combat, cast, bags full).
 - Left-click turns the addon on or off. Right-click opens the editor.
 - Its tooltip lists the active rules, what each slot has swapped in, and any pending or failed state with the reason.
@@ -637,6 +696,7 @@ Hand-rolled, with no LibDBIcon:
 | `/ac on` \| `off` \| `toggle` | Turn the addon on or off |
 | `/ac add <link\|id> [trigger[,trigger]] [slot]` | Add a custom rule |
 | `/ac addenchant <link> [trigger]` | Add an enchant rule using the enchant on the linked item |
+| `/ac addset <need> <link> <link> [...] [trigger]` | Add a set rule (§5.6), e.g. `/ac addset 2 [Signet] [Cloak] always` |
 | `/ac remove <link\|id\|rule#>` | Remove a custom rule |
 | `/ac list` | Print all rules, their state, and the reason for any failure |
 | `/ac scan` | Run discovery now |
@@ -685,6 +745,10 @@ Hand-rolled, with no LibDBIcon:
 | API changes between beta builds | Every client API call goes through small wrappers in `Core.lua` (`ns.API.*`), so a fix touches one place |
 | Equipping becomes restricted to hardware events | Secure "Swap now" fallback button (§6.6) |
 | Secret-value restrictions reach item APIs | If tooltip data comes back secret, discovery turns itself off. The rest of the addon does not depend on it |
+| Speed weapon equipped when a fight starts | Real weapon put back at once (weapon-only combat pass). Waits while disarmed (§6.9) |
+| Two-hander pushes the off hand into the bags | Off hand saved and owned. Its restore is blocked while the two-hander is wanted. Needs a free bag slot (§6.9) |
+| Set bonus needs 2 pieces | Set rule, placed all or nothing (§5.6) |
+| "Movement speed while mounted" read as run speed | "while mounted" pattern checked first (§7.2) |
 | Zone-limited items (The Desert Rose) | Zone condition. Only worn in matching zones. Leaving the zone restores normal gear (§5.5) |
 | Zone group list wrong or incomplete | Editable in game. Matched by name until the map ID is learned (§5.5) |
 | Mount-speed items stack in Forever | All mount rules are worn together. The trinket count is capped by `speedTrinketSlots` (§5.3, §6.5) |
@@ -730,7 +794,7 @@ The rule-choice logic (`AssignSlots`, excludes, priority, the never-save-a-speed
 | 27 | Same as #26 with `speedTrinketSlots = 1` | Only the higher-priority trinket goes on, plus gloves and boots. The other trinket stays in the bags |
 | 28 | Normal trinkets: one passive, one on-use and ready. Mount with the Carrot | The passive trinket is swapped out. The on-use trinket is untouched, so no 30 s cooldown |
 | 29 | Normal trinkets: both on-use, one with 90 s of cooldown left. Mount | The trinket already on cooldown is swapped out, which costs nothing |
-| 30 | Disarmed, or in combat with weapons swapped by hand | Ignored by the addon. Weapon slots are never touched in v1 |
+| 30 | Weapons swapped by hand in combat, with no speed weapon owned | Ignored by the addon. Only owned weapon slots are restored in combat (§6.9) |
 | 31 | Mounted with two speed trinkets, gloves and spurs. Knocked off by a mob, fight, combat ends | Speed gear stays on during the fight. When combat ends, both original trinkets, gloves and boots go back into their original slots, with no delay |
 | 32 | Same as #31, plus a custom swim item, but combat ends while swimming | Mount gear restored. The swim item goes on instead of being skipped |
 | 33 | Same as #31, but a second pull starts after one trinket is restored | Remaining slots restored after the second combat ends |
@@ -739,13 +803,21 @@ The rule-choice logic (`AssignSlots`, excludes, priority, the never-save-a-speed
 | 36 | The Desert Rose, `speedTrinketSlots = 1`. Mount in Tanaris, then outside the desert | The Rose in Tanaris (priority 110). The Carrot outside |
 | 37 | Stand in a zone not in the group, `/ac zone add desert`, mount | The Rose is equipped. `/ac zone` lists the zone with its map ID |
 | 38 | A bag item with "… in Snowy areas" | Suggestion shows "(Snowy areas)". After Add, the editor says the group has no zones yet |
+| 39 | Staff of Westfall enabled, in Westfall, a one-hander and shield equipped | Staff equipped, shield goes to the bags. Leaving Westfall restores the main hand first, then the shield |
+| 40 | Same as #39, then pull a mob | The real weapon and shield go back on immediately in combat. The staff returns after combat |
+| 41 | Same as #40 while disarmed | No swap while disarmed. The swap happens as soon as the disarm ends |
+| 42 | Same as #39 with full bags | One warning. The staff is not equipped |
+| 43 | Two Blessing of Kalimdor pieces in the bags, in the Barrens | Both pieces equipped together. Leaving the Barrens restores both slots |
+| 44 | Only one Blessing of Kalimdor piece | Nothing equipped |
+| 45 | Wintersaber gloves and a Riding Skill-enchanted pair, mounted in Winterspring | Wintersaber gloves (priority 110). Outside Winterspring: the enchanted pair |
+| 46 | Tooltip "(2) Set: Increases mount speed by 5% in Eastern and Western Plaguelands." | Set suggestion with zones Eastern Plaguelands and Western Plaguelands |
 
 ---
 
 ## 11. Milestones
 
 1. **Port.** New TOC (`16001`), `Core.lua` with API wrappers and safe DB init, built-in rules running as in 3.01. *Exit:* tests 1, 3, 7 and 11 pass.
-2. **Rule engine.** `Items.lua` data, the single engine loop, events instead of `OnUpdate`, equipping by bag location, slot choice, guards, restore delay, crash cleanup. Pure-Lua unit tests for `AssignSlots`. *Exit:* tests 1–3, 6–8, 11–18, 20, 21, 25–29, 31–37 pass.
+2. **Rule engine.** `Items.lua` data, the single engine loop, events instead of `OnUpdate`, equipping by bag location, slot choice, guards, restore delay, crash cleanup. Pure-Lua unit tests for `AssignSlots`. *Exit:* tests 1–3, 6–8, 11–18, 20, 21, 25–29, 31–37, 39–45 pass.
 3. **Custom rules and slash commands.** The global DB, item and enchant rules, the usability check, failure back-off, `/ac add/addenchant/remove/list/restore`. *Exit:* tests 4, 5, 19, 22–24 pass.
 4. **Settings panel and buttons.** *Exit:* every setting works from the UI. Test 10 passes.
 5. **Item editor.** Drag-and-drop, rows, multi-trigger dropdown, status icons.
@@ -759,12 +831,14 @@ The rule-choice logic (`AssignSlots`, excludes, priority, the never-save-a-speed
 1. **Built-in items in Forever:** do the Carrot (11122) and enchants 930 and 464 exist and still give mount speed? Riding Crop, Skybreaker Whip, the swim belt and the swim helm are confirmed missing (§3.4).
 2. **Level cap:** 3.01 stopped the mount swaps above level 70 because the Carrot stops working at higher levels. What is Forever's cap, and do the items have a level limit? The fork removes the hard-coded check. If a limit exists, it becomes a `maxLevel` field on the rule, read from the tooltip where possible.
 3. **Flying:** does Forever have flying mounts? If not, hide the `flying` trigger.
-4. **Weapons and two-handers:** worth supporting after v1? Weapons can be swapped in combat, so this needs the separate code path described in §5.4.
+4. **Weapon swap cost:** does a weapon swap in combat trigger a global cooldown in Forever, and does it reset the swing timer? This decides whether the weapon built-ins should stay off by default (§6.9).
 5. **Distribution:** publish as "AutoCarrot Forever" on CurseForge or Wago? Check the license and permission with the original author, kebabstorm.
 6. **Sharing rules:** add an export/import string for custom rules later, so players can share newly found items?
 
 7. **Desert areas:** which zones count? The default is Tanaris and Silithus. Check with `/ac speed` while mounted in other dry zones (Badlands, Desolace, Thousand Needles, Durotar, the Barrens) and fix the group with `/ac zone add|remove desert`.
-8. **Zone-limited set bonuses:** an unconfirmed report mentions a 2-piece set with +5% movement speed in the Barrens and Stonetalon. Rules swap single items, so set bonuses are out of scope for v1. A future "swap these items together" rule could cover them.
+8. **Rider of the Plaguelands pieces:** names, IDs and sources are unknown. Once found: `/ac addset 2 <links> mounted` (§5.6), and consider making it a built-in.
+9. **Enchant Boots - Speed:** which enchant ID does it put on boots? With that ID it can become a built-in like Mithril Spurs. Is it live or PTR-only?
+10. **`C_LootJournal.GetItemSetItems`:** does it return the pieces of Forever's new sets? If not, set suggestions fall back to `/ac addset` (§7.2).
 
 ### Answered in game (2026-11-11)
 
@@ -784,6 +858,8 @@ Where the first build differs from the sections above, and why:
 - **Built-in items that are not soulbound** are never equipped automatically. The player is asked once to equip the item by hand to bind it. Custom rules use the per-rule *Allow binding* box (§6.6).
 - **Unbound items with permission** are equipped through `EquipItemByName`, so the client shows its own bind confirmation. Everything else uses the bag-location path (§6.2).
 - **Usability in the engine is checked by required level only.** Class and armor-type problems are caught by the failure back-off (§6.6). The editor uses the full check (`C_PlayerInfo.CanUseItem`) to grey out rows.
+- **One-handed weapons** are only placed in the main hand. Offering the off hand would need a dual-wield check.
 - **Hiding unverified built-ins (§3.4)** is not done yet, because nobody has checked which ones exist in Forever. Every built-in is listed.
 - **Missing 3.01 items:** Riding Crop, Skybreaker Whip, the swim belt and the swim helm are not in Forever. → Removed from the built-ins (§3.4). An item named "Riding Gloves" exists but gives no speed, so rules match enchant and item IDs only, never names.
 - **Zone-limited items:** The Desert Rose (274648) gives +7% mount speed in Desert areas. → Built-in with a zone condition. Zone groups added (§5.5).
+- **More Forever speed gear** (research, 2026-11-11): Wintersaber Hide Lined Gloves, Agamaggan's Clutch, the Blessing of Kalimdor set and three two-handed weapons. → New built-ins (§3.4). Weapon support (§6.9) and set rules (§5.6) added.

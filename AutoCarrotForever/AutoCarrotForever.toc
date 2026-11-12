@@ -17,5 +17,6 @@ Engine.lua
 Discovery.lua
 UI\Widgets.lua
 UI\Settings.lua
+UI\ZoneGroups.lua
 UI\ItemList.lua
 UI\Buttons.lua

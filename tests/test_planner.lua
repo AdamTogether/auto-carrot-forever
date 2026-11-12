@@ -206,5 +206,90 @@ test("zone-limited rule needs a known zone", function()
     eq(P.ZoneMatches({ { group = "desert" } }, nil, GROUPS), false)
 end)
 
+test("instance and sub-zone names, leading 'The' ignored", function()
+    local westfall = { { name = "Elwynn Forest" }, { name = "the Deadmines" } }
+    eq(P.ZoneMatches(westfall, { name = "Westfall", names = { "Moonbrook", "Westfall", "Deadmines" } }, nil), true)
+    eq(P.ZoneMatches({ { name = "The Barrens" } }, { name = "Barrens" }, nil), true)
+    eq(P.ZoneMatches({ { mapID = 52 } }, { name = "Westfall", mapIDs = { 291, 52 } }, nil), true)
+end)
+
+-- SplitZones -----------------------------------------------------------------------
+
+local function joined(list) return table.concat(list, "|") end
+
+test("split a comma list with 'and'", function()
+    eq(joined(P.SplitZones("The Barrens, Thousand Needles, Razorfen Kraul, and Razorfen Downs.")),
+        "The Barrens|Thousand Needles|Razorfen Kraul|Razorfen Downs")
+    eq(joined(P.SplitZones("Silverpine Forest and Hillsbrad Foothills.")), "Silverpine Forest|Hillsbrad Foothills")
+    eq(joined(P.SplitZones("Winterspring.")), "Winterspring")
+end)
+
+test("split shared noun: Eastern and Western Plaguelands", function()
+    eq(joined(P.SplitZones("Eastern and Western Plaguelands.")), "Eastern Plaguelands|Western Plaguelands")
+end)
+
+-- Two-handers ------------------------------------------------------------------------
+
+test("two-hander reserves the off hand", function()
+    local staff = rule("staff", 2042, 100, { 16 }, { twoHand = true })
+    local shield = rule("shield", 900010, 90, { 17 })
+    local plan = P.Plan({ rules = { staff, shield }, equipped = {}, trinketBudget = 2 })
+    eq(plan[16].id, "staff")
+    eq(plan[17], nil)
+end)
+
+test("higher-priority off-hand blocks a two-hander", function()
+    local staff = rule("staff", 2042, 90, { 16 }, { twoHand = true })
+    local shield = rule("shield", 900010, 100, { 17 })
+    local plan = P.Plan({ rules = { staff, shield }, equipped = {}, trinketBudget = 2 })
+    eq(plan[17].id, "shield")
+    eq(plan[16], nil)
+end)
+
+-- Sets ---------------------------------------------------------------------------------
+
+local function setRule(id, need, pieces, extra)
+    local r = { id = id, need = need, pieces = {}, priority = 100, source = "builtin", order = 0 }
+    for _, p in ipairs(pieces) do
+        r.pieces[#r.pieces + 1] = { match = { itemID = p[1] }, slots = p[2] }
+    end
+    for k, v in pairs(extra or {}) do r[k] = v end
+    return r
+end
+
+test("set places the needed number of pieces", function()
+    local kalimdor = setRule("kalimdor", 2, { { 285330, { 11, 12 } }, { 285331, { 2 } }, { 285329, { 15 } } })
+    local plan = P.Plan({ rules = { kalimdor }, equipped = {}, trinketBudget = 2 })
+    local n = 0
+    for _, r in pairs(plan) do n = n + 1; eq(r.id, "kalimdor") end
+    eq(n, 2)
+end)
+
+test("set prefers pieces already worn", function()
+    local kalimdor = setRule("kalimdor", 2, { { 285330, { 11, 12 } }, { 285331, { 2 } }, { 285329, { 15 } } })
+    local plan = P.Plan({ rules = { kalimdor }, equipped = { [15] = item(285329) }, trinketBudget = 2 })
+    eq(plan[15] and plan[15].id, "kalimdor", "worn cloak kept")
+end)
+
+test("set is all or nothing", function()
+    -- One ring slot is taken by a higher-priority rule; the set's two rings
+    -- can only fill the other, so the set must not be placed at all.
+    local ring = rule("ring", 900020, 200, { 11, 12 })
+    local set = setRule("s", 2, { { 900030, { 11, 12 } }, { 900031, { 11, 12 } } })
+    local plan = P.Plan({ rules = { ring, set }, equipped = {}, trinketBudget = 2 })
+    local n = 0
+    for _, r in pairs(plan) do
+        n = n + 1
+        if r.id == "s" then error("set should not be partially placed") end
+    end
+    eq(n, 1)
+end)
+
+test("RuleMatches covers set pieces", function()
+    local kalimdor = setRule("kalimdor", 2, { { 285330, { 11, 12 } }, { 285331, { 2 } } })
+    eq(P.RuleMatches(kalimdor, item(285331)), true)
+    eq(P.RuleMatches(kalimdor, item(1)), false)
+end)
+
 print(string.format("%d passed, %d failed", passed, failed))
 if failed > 0 then os.exit(1) end

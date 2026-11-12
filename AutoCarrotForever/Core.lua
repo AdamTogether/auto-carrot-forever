@@ -208,24 +208,40 @@ function API.GetInventoryItemTooltip(slot)
     end
 end
 
--- The player's current zone as { mapID, name }: walks up from the most
--- specific map (sub-zone, building, floor) to the zone-level map.
+-- The player's location (DESIGN.md §5.5):
+--   { mapID, name }        the zone-level map (what "Add current zone" stores)
+--   { names, mapIDs }      every map from the most specific one (sub-zone,
+--                          building, dungeon floor) up to the zone, plus the
+--                          instance name, so "the Deadmines" matches inside it.
 function API.GetCurrentZone()
     local zoneType = Enum and Enum.UIMapType and Enum.UIMapType.Zone
+    local result = { names = {}, mapIDs = {} }
     local mapID = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
     for _ = 1, 10 do
         if not mapID or not zoneType then break end
         local info = C_Map.GetMapInfo(mapID)
         if not info then break end
-        if info.mapType == zoneType then
-            return { mapID = mapID, name = info.name }
-        end
         if info.mapType and info.mapType < zoneType then break end -- continent or larger
+        table.insert(result.names, info.name)
+        table.insert(result.mapIDs, mapID)
+        if info.mapType == zoneType and not result.mapID then
+            result.mapID, result.name = mapID, info.name
+        end
         mapID = info.parentMapID
     end
-    local name = GetRealZoneText and GetRealZoneText()
-    if name and name ~= "" then return { name = name } end
-    return nil
+    local realZone = GetRealZoneText and GetRealZoneText()
+    if realZone and realZone ~= "" then table.insert(result.names, realZone) end
+    if IsInInstance() and GetInstanceInfo then
+        local instanceName = GetInstanceInfo()
+        if instanceName and instanceName ~= "" then table.insert(result.names, instanceName) end
+    end
+    -- In a dungeon there may be no zone-level map: use the most specific name.
+    if not result.name then
+        result.name = result.names[1]
+        result.mapID = result.mapIDs[1]
+    end
+    if not result.name then return nil end
+    return result
 end
 
 -- Movement speed as a percentage of normal run speed (7 yards/s).
@@ -318,7 +334,7 @@ local function InitDB()
     local scale = tonumber(ns.db.button.scale) or 1
     ns.db.button.scale = math.min(2, math.max(0.5, scale))
     for _, b in ipairs(ns.BUILTINS) do
-        if ns.db.builtins[b.id] == nil then ns.db.builtins[b.id] = true end
+        if ns.db.builtins[b.id] == nil then ns.db.builtins[b.id] = not b.defaultOff end
     end
     for key, zones in pairs(ns.ZONE_GROUP_DEFAULTS) do
         if ns.gdb.zoneGroups[key] == nil then ns.gdb.zoneGroups[key] = copy(zones) end
@@ -372,6 +388,7 @@ local function printHelp()
     ns.Print("  /ac on | off | toggle (" .. onOff(db.enabled) .. ")")
     ns.Print("  /ac add <link|id> [trigger,trigger] [slot|auto]")
     ns.Print("  /ac addenchant <link> [trigger,trigger]")
+    ns.Print("  /ac addset <pieces needed> <link> <link> [<link>...] [trigger,trigger]")
     ns.Print("  /ac remove <link|id|rule#>")
     ns.Print("  /ac list | scan | restore | options")
     ns.Print("  /ac lock <slot> | unlock <slot>")
@@ -384,12 +401,16 @@ end
 
 local function handleSlash(msg)
     msg = msg or ""
-    -- Pull the item link out first: links contain spaces and case-sensitive data.
-    local link = msg:match("|c%x+|Hitem:.-|h.-|h|r") or msg:match("|Hitem:.-|h.-|h")
-    if link then
-        local s, e = msg:find(link, 1, true)
+    -- Pull item links out first: links contain spaces and case-sensitive data.
+    local links = {}
+    while true do
+        local found = msg:match("|c%x+|Hitem:.-|h.-|h|r") or msg:match("|Hitem:.-|h.-|h")
+        if not found then break end
+        links[#links + 1] = found
+        local s, e = msg:find(found, 1, true)
         msg = msg:sub(1, s - 1) .. " " .. msg:sub(e + 1)
     end
+    local link = links[1]
     local args = {}
     for word in msg:gmatch("%S+") do args[#args + 1] = word end
     local cmd = (table.remove(args, 1) or ""):lower()
@@ -440,6 +461,25 @@ local function handleSlash(msg)
         else
             ns.Print(err)
         end
+    elseif cmd == "addset" then
+        local need = tonumber(args[1])
+        local pieces = {}
+        for _, l in ipairs(links) do pieces[#pieces + 1] = l end
+        for i = 2, #args do
+            if tonumber(args[i]) then pieces[#pieces + 1] = args[i] end
+        end
+        local triggerText = args[#args] and not tonumber(args[#args]) and args[#args] or nil
+        if not need or #pieces < 2 then
+            ns.Print("Usage: /ac addset <pieces needed> <link or id> <link or id> [...] [trigger,trigger]")
+            return
+        end
+        local triggers, bad = parseTriggers(triggerText)
+        if bad then
+            ns.Print("Unknown trigger '" .. bad .. "'. Use: " .. table.concat(ns.TRIGGER_ORDER, ", "))
+            return
+        end
+        local rule, err = ns.Engine:AddSetRule({ pieces = pieces, need = need, triggers = triggers })
+        ns.Print(rule and ("Added set rule #" .. rule.id .. " (" .. need .. " of " .. #pieces .. " pieces).") or err)
     elseif cmd == "remove" then
         local target = link or args[1]
         if not target then ns.Print("Usage: /ac remove <link|id|rule#>") return end

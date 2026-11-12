@@ -40,30 +40,85 @@ end
 -- Toggle button (3.01 behaviour, DESIGN.md §8.3)
 --------------------------------------------------------------------------------
 
-local function CreateToggle()
-    local ok, b = pcall(CreateFrame, "Button", "AutoCarrotForeverButton", UIParent, "ActionButtonTemplate")
-    if not ok or not b then
-        b = CreateFrame("Button", "AutoCarrotForeverButton", UIParent)
-        b:SetSize(36, 36)
-        b.icon = b:CreateTexture(nil, "ARTWORK")
-        b.icon:SetAllPoints()
+-- Position lives in our SavedVariables, not in the client's layout cache:
+-- Forever's Edit Mode re-lays out UIParent children and does not know this
+-- button, so SetUserPlaced positions were not reliable.
+local function applyTogglePosition()
+    local pos = ns.db.button.pos
+    toggle:ClearAllPoints()
+    if pos then
+        toggle:SetPoint(pos[1], UIParent, pos[2], pos[3], pos[4])
+    else
+        toggle:SetPoint("CENTER")
     end
+end
+
+local function saveTogglePosition()
+    local point, _, relPoint, x, y = toggle:GetPoint(1)
+    ns.db.button.pos = { point, relPoint, x, y }
+end
+
+-- Plain Button, no ActionButtonTemplate: the Mainline template brings its own
+-- scripts and drag handling, which swallowed Alt-drag on Forever.
+local function CreateToggle()
+    local b = CreateFrame("Button", "AutoCarrotForeverButton", UIParent)
+    b:SetSize(36, 36)
+    b:SetFrameStrata("MEDIUM")
+    b.icon = b:CreateTexture(nil, "ARTWORK")
+    b.icon:SetPoint("TOPLEFT", 2, -2)
+    b.icon:SetPoint("BOTTOMRIGHT", -2, 2)
     b.icon:SetTexture(ICON)
-    b:SetPoint("CENTER")
+    b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    local border = b:CreateTexture(nil, "BACKGROUND")
+    border:SetAllPoints()
+    border:SetColorTexture(0, 0, 0, 0.8)
+    b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    b:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
     b.overlay = b:CreateTexture(nil, "OVERLAY")
-    b.overlay:SetAllPoints(b)
+    b.overlay:SetPoint("TOPLEFT", 2, -2)
+    b.overlay:SetPoint("BOTTOMRIGHT", -2, 2)
+
+    b:EnableMouse(true)
     b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-    b:RegisterForDrag("LeftButton")
     b:SetMovable(true)
     b:SetClampedToScreen(true)
-    b:SetScript("OnDragStart", function(self)
-        if IsAltKeyDown() and not InCombatLockdown() then self:StartMoving() end
+    b:SetUserPlaced(false)
+
+    -- Alt + left mouse button moves it. Handled on mouse down/up directly
+    -- instead of OnDragStart, which needs the cursor to pass a drag threshold
+    -- first and can be eaten by other handlers.
+    b:SetScript("OnMouseDown", function(self, button)
+        self.suppressClick = false
+        if button == "LeftButton" and IsAltKeyDown() then
+            self.moving = true
+            self:StartMoving()
+        end
     end)
-    b:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        self:SetUserPlaced(true)
+    b:SetScript("OnMouseUp", function(self)
+        if self.moving then
+            self:StopMovingOrSizing()
+            self:SetUserPlaced(false) -- StartMoving marks it; keep it out of the layout cache
+            self.moving = false
+            self.suppressClick = true -- this mouse-up ends a move, not a click
+            saveTogglePosition()
+            applyTogglePosition()
+        end
     end)
-    b:SetScript("OnClick", function(_, button) onClick(button, false) end)
+    b:SetScript("OnHide", function(self)
+        if self.moving then
+            self:StopMovingOrSizing()
+            self.moving = false
+            saveTogglePosition()
+        end
+    end)
+    b:SetScript("OnClick", function(self, button)
+        if self.suppressClick then
+            self.suppressClick = false
+            return
+        end
+        if IsAltKeyDown() then return end -- Alt is reserved for moving
+        onClick(button, false)
+    end)
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         statusTooltip(GameTooltip)
@@ -171,9 +226,8 @@ end
 
 function UI.ResetButtons()
     local db = ns.db
-    toggle:ClearAllPoints()
-    toggle:SetPoint("CENTER")
-    toggle:SetUserPlaced(false)
+    db.button.pos = nil
+    applyTogglePosition()
     db.button.scale = 1
     db.minimap.angle = 225
     positionMinimap()
@@ -182,6 +236,7 @@ end
 
 ns:On("AC_LOADED", function()
     toggle = CreateToggle()
+    applyTogglePosition()
     minimap = CreateMinimap()
     positionMinimap()
     UI.UpdateButtons()
