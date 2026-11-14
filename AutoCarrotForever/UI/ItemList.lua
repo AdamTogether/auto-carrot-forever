@@ -163,6 +163,11 @@ local function CreateAddBar(f)
     f.input = input
 
     local trigger = UI.CreateButton(f, "When: Mounted", 190, nil)
+    UI.ClampButtonText(trigger)
+    UI.SetTooltip(trigger, function(tt)
+        tt:SetText("When the new item is worn", 1, 1, 1)
+        tt:AddLine(UI.TriggerText(pending.triggers), 1, 0.82, 0, true)
+    end)
     trigger:SetPoint("LEFT", input, "RIGHT", 10, 0)
     trigger:SetScript("OnClick", function(self)
         local entries = { { text = "Active when any of these is true", isTitle = true } }
@@ -335,7 +340,9 @@ local function CreateRuleRow(parent)
         tt:AddLine("Rule #" .. c.id, 0.6, 0.6, 0.6)
     end)
 
-    row.slot = UI.CreateButton(row, "Auto", 90, function(self)
+    row.slot = UI.CreateButton(row, "Auto", 90, nil)
+    UI.ClampButtonText(row.slot)
+    row.slot:SetScript("OnClick", function(self)
         local c = row.entry
         local slots = ruleSlots(c)
         local entries = { { text = "Slot", isTitle = true } }
@@ -355,7 +362,9 @@ local function CreateRuleRow(parent)
     end)
     row.slot:SetPoint("LEFT", 216, 0)
 
-    row.trigger = UI.CreateButton(row, "", 140, function(self)
+    row.trigger = UI.CreateButton(row, "", 140, nil)
+    UI.ClampButtonText(row.trigger)
+    row.trigger:SetScript("OnClick", function(self)
         local c = row.entry
         local entries = { { text = "Active when any of these is true", isTitle = true } }
         for _, key in ipairs(ns.TRIGGER_ORDER) do
@@ -373,6 +382,7 @@ local function CreateRuleRow(parent)
     row.trigger:SetPoint("LEFT", 310, 0)
     UI.SetTooltip(row.trigger, function(tt)
         tt:SetText("When this item is worn", 1, 1, 1)
+        tt:AddLine(UI.TriggerText(row.entry.triggers), 1, 0.82, 0, true)
         tt:AddLine("Only while AutoCarrot is turned on. Turning it off puts your normal gear back.", 0.8, 0.8, 0.8, true)
         if row.entry.triggers.always then
             tt:AddLine(ns.TRIGGERS.always.warning, 1, 0.82, 0, true)
@@ -383,9 +393,11 @@ local function CreateRuleRow(parent)
     end)
 
     row.zones = UI.CreateButton(row, "", 120, function(self) UI.ShowZoneMenu(self, row.entry) end)
+    UI.ClampButtonText(row.zones)
     row.zones:SetPoint("LEFT", 454, 0)
     UI.SetTooltip(row.zones, function(tt)
         tt:SetText("Where this item works", 1, 1, 1)
+        tt:AddLine(ns.Engine:ZoneLabel(row.entry.zones), 1, 0.82, 0, true)
         tt:AddLine("Some Forever items only work in certain zones, such as 'in Desert areas'. Zone groups like Desert areas are shared by every rule and character.", nil, nil, nil, true)
         tt:AddLine("Current zone: " .. ((ns.API.GetCurrentZone() or {}).name or "unknown"), 0.6, 0.8, 1)
     end)
@@ -504,8 +516,11 @@ local function CreateSuggestionRow(parent)
         if row.s.link then tt:SetHyperlink(row.s.link) else tt:SetItemByID(row.s.itemID) end
     end)
 
+    -- Laid out from the right: [Ignore] at the edge, [Add ...] sized to its
+    -- text left of it, and the quoted tooltip text takes what is left (and
+    -- truncates), so a long button label can never overflow.
     row.text = row:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-    row.text:SetSize(270, ROW_H)
+    row.text:SetHeight(ROW_H)
     row.text:SetPoint("LEFT", 254, 0)
     row.text:SetJustifyH("LEFT")
     row.text:SetWordWrap(false)
@@ -530,12 +545,13 @@ local function CreateSuggestionRow(parent)
         })
         setMessage(rule and ("Added rule #" .. rule.id .. "." .. UI.ZoneNote(rule.zones)) or err, not rule)
     end)
-    row.add:SetPoint("LEFT", 530, 0)
 
     row.ignore = UI.CreateButton(row, "Ignore", 64, function()
         ns.Discovery:Ignore(row.s.key)
     end)
-    row.ignore:SetPoint("LEFT", 684, 0)
+    row.ignore:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+    row.add:SetPoint("RIGHT", row.ignore, "LEFT", -6, 0)
+    row.text:SetPoint("RIGHT", row.add, "LEFT", -8, 0)
     UI.SetTooltip(row.ignore, "Never suggest this again (on any character).")
     return row
 end
@@ -553,6 +569,10 @@ local function FillSuggestionRow(row, s)
         row.add:SetText("Add as " .. ns.TRIGGERS[s.trigger].label)
         row.add:SetEnabled(true)
     end
+    -- Fit the button to its label (UIPanelButtonTemplate needs ~24 px of padding).
+    local fs = row.add:GetFontString()
+    local textWidth = fs and fs:GetStringWidth() or 0
+    row.add:SetWidth(math.max(110, math.ceil(textWidth) + 28))
 end
 
 --------------------------------------------------------------------------------

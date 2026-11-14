@@ -74,6 +74,18 @@ function UI.CreateButton(parent, text, width, onClick)
     return b
 end
 
+-- Keeps a fixed-width button's label inside the button: long text is cut
+-- with "..." instead of spilling over its neighbours. Show the full text in
+-- the button's tooltip.
+function UI.ClampButtonText(button)
+    local fs = button:GetFontString()
+    if not fs then return end
+    fs:ClearAllPoints()
+    fs:SetPoint("LEFT", 8, 0)
+    fs:SetPoint("RIGHT", -8, 0)
+    fs:SetWordWrap(false)
+end
+
 -- tooltip: string or function(GameTooltip)
 function UI.SetTooltip(frame, tooltip)
     frame:EnableMouse(true) -- plain Frames ignore the mouse otherwise
