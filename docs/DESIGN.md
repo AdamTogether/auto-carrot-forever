@@ -221,7 +221,7 @@ AutoCarrotForeverDB = {
   chatSuggestions = true,
   debug = false,
 
-  button  = { shown = false, scale = 1.0 },           -- position is saved by SetUserPlaced
+  button  = { shown = true, scale = 1.0 },             -- shown by default (char DB migration 3)           -- position is saved by SetUserPlaced
   minimap = { hide = false, angle = 225 },             -- degrees around the minimap
 
   builtins = {                                         -- on/off per built-in rule, keyed by Items.lua id
@@ -406,13 +406,13 @@ The engine first finds the exact bag item: the right copy for an item rule, or a
 | `swimming` | `IsSwimming()` | **yes** | Also true in Aquatic Form and on swimming mounts |
 | `submerged` | `IsSubmerged()` | **yes** | Same as 3.01 |
 | `resting` | `IsResting()` | no | Speed gear in cities and inns |
-| `always` | always true | no | Run-speed items. **The item stays on through combat**, because armor cannot be swapped in combat (§6.6). The editor warns about this when the trigger is chosen. Use `noInstance` to keep it out of dungeons. |
+| `always` | always true | no | Shown to players as **"Always (while on)"** / "Always, while AutoCarrot is on". It means **whenever AutoCarrot is turned on** (and the rule's zones match); turning AutoCarrot off restores normal gear. For run-speed items. **The item stays on through combat**, because armor cannot be swapped in combat (§6.6). The editor warns about this when the trigger is chosen. Use `noInstance` to keep it out of dungeons. |
 
 There is deliberately no `outOfCombat` trigger. The name would suggest the item would come off for combat, which the game does not allow: a swap can only start once combat has *already* begun, and then it is too late.
 
 A rule's `triggers` is a set. The rule is active if **any** of them is active, for example a trinket that helps both mounted and swimming.
 
-Triggers live in a table, `ns.TRIGGERS[key] = { test = fn, polled = bool, label = L["..."] }`. The UI dropdown is built from the same table.
+Triggers live in a table, `ns.TRIGGERS[key] = { test, polled, label, menu, phrase, warning }`: `label` for buttons, `menu` for menus, `phrase` for sentences such as "Swap in X whenever AutoCarrot is on". Keys are saved data and never shown. The UI dropdown is built from the same table.
 
 ### 6.4 When it runs
 
@@ -479,7 +479,12 @@ Other safety rules:
   6. **Dying in that combat:** the restore waits for `PLAYER_ALIVE` / `PLAYER_UNGHOST`, then runs the same way.
   7. **`/reload` or logout before combat ends:** the saved state is in SavedVariables, so the cleanup at the next login (§6.4) restores the gear.
   8. **Feedback:** while a restore is waiting, the toggle button turns yellow and its tooltip says "Restore pending (combat)". With `debug` on, a chat line confirms when the gear is back.
-- **Bind on equip:** before equipping from the bags, check `C_Item.IsBound(location)`. If the item is unbound and `rule.allowBind` is false, skip it and print one chat message per item per session: "*X* would become soulbound. Enable it in the item list to allow." This replaces 3.01's `StaticPopup1` check. If the client shows a bind confirmation anyway, the addon never accepts it on the player's behalf.
+- **Binding (checked before planning):** a bag item counts for a rule only if equipping it can't cause an unwanted bind (`Engine:CanEquipFromBags`):
+  - **already soulbound**: yes;
+  - **never binds**: bind type `None`, as with most white items. Players keep enchanted white gear such as Knitted Sandals with Mithril Spurs unbound on purpose, to share between alts. These are always allowed, for built-in and custom rules alike;
+  - **Bind on Equip/Use, not bound yet**: only if the rule has `allowBind` (custom rules) and the player didn't decline the client's bind prompt.
+
+  The check runs inside `Has()`, *before* the planner assigns slots, so a rule with no equippable copy never claims a slot ahead of one that has one. A bug in v4.0.0 had the built-in enchant rule claim hands or feet and then refuse a never-binding white item, so the player's own custom rule never got a turn. The equip step uses the same check to pick an allowed copy. A skipped BoE item prints one chat message per rule per session, telling the player how to allow it. Allowed BoE items go through `EquipItemByName`, so the client shows its own bind confirmation.
 - **Failure detection and back-off:** after an equip call, expect `PLAYER_EQUIPMENT_CHANGED` for that slot within 1.5 s. If it does not arrive, or `UI_ERROR_MESSAGE` reports a failure (wrong level, wrong armor type, "can't do that right now"), increase `failures[ruleId]`. After **3** failures the rule is marked failed until `/reload` or until the user edits it, with one chat message. This stops endless retry loops and red-error spam.
 - **Debounce:** at most one equip per slot every 0.5 s.
 - **Bags full:** a restore needs a free bag slot for the speed item. If none is free, print a warning once per session and leave the speed item on. Retry on `BAG_UPDATE_DELAYED`.
@@ -556,6 +561,8 @@ Read `C_TooltipInfo.GetBagItem(bag, slot)` / `GetInventoryItem("player", slot)` 
 ```lua
 ns.SPEED_PATTERNS = {
   { pattern = "while mounted",          trigger = "mounted"   }, -- "movement speed while mounted" must not become "always"
+  { pattern = "mithril spurs",          trigger = "mounted"   }, -- enchant lines show only the name
+  { pattern = "riding skill",           trigger = "mounted"   }, --   ("Enchanted: Mithril Spurs"), no speed wording
   { pattern = "mount.- speed",          trigger = "mounted"   },
   { pattern = "riding speed",           trigger = "mounted"   },
   { pattern = "swim.- speed",           trigger = "swimming"  },
@@ -606,7 +613,7 @@ Everything lives on this one scrolling page:
 | Checkbox | Never swap out on-use trinkets (§6.7) |
 | Stepper `< 1.0 s >` (0–5 s, step 0.5) | Restore delay: mounted / swimming / underwater |
 | Section header | Interface |
-| Checkbox | Show toggle button |
+| Checkbox | Show toggle button (**on by default**) |
 | Stepper (0.5–2.0, step 0.1) | Toggle button scale |
 | Checkbox | Show minimap button |
 | Checkbox | Show speed-item suggestions in chat |
@@ -650,7 +657,7 @@ A movable window (`BasicFrameTemplateWithInset`, strata `DIALOG` so it sits abov
   - Drag an item from the bags onto the drop zone (`OnReceiveDrag` + `GetCursorInfo()`, then `ClearCursor()` so the item goes back to its bag).
   - Shift-click an item link into the edit box (hook `ChatEdit_InsertLink` while the box has focus).
   - Type an item ID.
-- **Item or enchant:** if the item that was dropped or linked has an enchant, the **Match** choice appears. "Enchant" makes a rule that matches any item with that enchant, and its slot is fixed to the item's slot.
+- **Item or enchant:** if the item that was dropped or linked has an enchant, the **Match** choice appears. Enchant rules are labelled with the **enchant's name** ("Enchant: Mithril Spurs"), read from the item's tooltip line "Enchanted: …" (`API.GetEnchantName`). Rules saved before this change, which only showed "#464", get their name filled in from the item they were made from. "Enchant" makes a rule that matches any item with that enchant, and its slot is fixed to the item's slot.
 - **Checks when adding:**
   - Unsupported slots (shirts, tabards): rejected with a message (§5.4). Weapon rows get a tooltip warning about the swap at the start of each fight (§6.9).
   - Not equippable: rejected.
@@ -711,7 +718,8 @@ Hand-rolled, with no LibDBIcon:
 | `/ac addset <need> <link> <link> [...] [trigger]` | Add a set rule (§5.6), e.g. `/ac addset 2 [Signet] [Cloak] always` |
 | `/ac remove <link\|id\|rule#>` | Remove a custom rule |
 | `/ac list` | Print all rules, their state, and the reason for any failure |
-| `/ac scan` | Run discovery now |
+| `/ac scan` | Run discovery now. Also lists items it skipped because a rule already covers them, and which rule, e.g. "[Web-covered Boots] - Mithril Spurs boot enchant (#464)". Covered items are never suggested |
+| `/ac check <link>` | Explain one item: item ID, **enchant ID**, slot type, where it is, whether it's soulbound, its bind type, every rule that matches it, and whether that copy can be swapped (or would bind). The quickest way to see why something isn't swapping |
 | `/ac restore` | Clear the failed, manual-change and warning flags, then re-sync gear at once (no restore delay). Speed gear whose trigger is still on stays on |
 | `/ac lock <slot>` / `unlock <slot>` | Lock or unlock a slot |
 | `/ac zone` | Show the current zone (name and map ID) and every zone group, marking the ones you are in |
@@ -823,6 +831,7 @@ The rule-choice logic (`AssignSlots`, excludes, priority, the never-save-a-speed
 | 44 | Only one Blessing of Kalimdor piece | Nothing equipped |
 | 45 | Wintersaber gloves and a Riding Skill-enchanted pair, mounted in Winterspring | Wintersaber gloves (priority 110). Outside Winterspring: the enchanted pair |
 | 46 | Tooltip "(2) Set: Increases mount speed by 5% in Eastern and Western Plaguelands." | Set suggestion with zones Eastern Plaguelands and Western Plaguelands |
+| 47 | Unbound **white** Knitted Sandals with Mithril Spurs (and Woven Gloves with Riding Skill) in the bags, no custom rule, then mount | Built-in enchant rules equip them (they never bind). With a BoE copy instead: skipped with one message, and a custom rule with Allow binding equips it after the client's confirm |
 
 ---
 
@@ -867,7 +876,7 @@ Where the first build differs from the sections above, and why:
 - **No inventory cache.** `Refresh()` scans bags and equipment every time it runs. It only runs on events and on changes to polled triggers, never every frame, so the cost is small and stale-cache bugs are impossible.
 - **Rule lists use a plain `ScrollFrame`** with rows created as needed, not `ScrollBox`/`DataProvider`. The custom list is short, and `UIPanelScrollFrameTemplate` exists on every client version.
 - **The editor is its own window.** It opens from a button on the options page; there are no settings sub-pages (§8.1).
-- **Built-in items that are not soulbound** are never equipped automatically. The player is asked once to equip the item by hand to bind it. Custom rules use the per-rule *Allow binding* box (§6.6).
+- **Built-in rules never bind an item.** Bind-on-Equip items that aren't soulbound yet are skipped, with one message suggesting a custom rule with *Allow binding*. Items that never bind, such as most white items, are always swapped (§6.6).
 - **Unbound items with permission** are equipped through `EquipItemByName`, so the client shows its own bind confirmation. Everything else uses the bag-location path (§6.2).
 - **Usability in the engine is checked by required level only.** Class and armor-type problems are caught by the failure back-off (§6.6). The editor uses the full check (`C_PlayerInfo.CanUseItem`) to grey out rows.
 - **With `/ac debug 1`**, every change in what the engine is waiting for is logged, e.g. "Waiting: window (BankPanel)" or "No longer waiting". This makes a stuck guard easy to spot.

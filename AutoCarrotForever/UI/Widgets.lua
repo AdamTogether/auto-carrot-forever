@@ -89,6 +89,15 @@ function UI.SetTooltip(frame, tooltip)
     frame:HookScript("OnLeave", function() GameTooltip:Hide() end)
 end
 
+-- "while mounted or while swimming" for sentences.
+function UI.TriggerPhrase(triggers)
+    local parts = {}
+    for _, key in ipairs(ns.TRIGGER_ORDER) do
+        if triggers[key] then parts[#parts + 1] = ns.TRIGGERS[key].phrase end
+    end
+    return #parts > 0 and table.concat(parts, " or ") or "never"
+end
+
 function UI.TriggerText(triggers)
     local parts = {}
     for _, key in ipairs(ns.TRIGGER_ORDER) do

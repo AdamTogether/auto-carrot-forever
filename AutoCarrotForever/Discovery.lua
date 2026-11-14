@@ -14,6 +14,11 @@ local PATTERNS = {
     enUS = {
         -- "movement speed while mounted" must win over plain "movement speed".
         { pattern = "while mounted", trigger = "mounted", kind = "mount speed" },
+        -- Mount-speed enchants: the tooltip shows only the enchant's name
+        -- ("Enchanted: Mithril Spurs"), with no speed wording. Catches them if
+        -- Forever's enchant IDs differ from the built-in rules' 464 / 930.
+        { pattern = "mithril spurs", trigger = "mounted", kind = "mount speed" },
+        { pattern = "riding skill", trigger = "mounted", kind = "mount speed" },
         -- %f[%a] stops "amount ... speed" from matching.
         { pattern = "%f[%a]mount%a* speed", trigger = "mounted", kind = "mount speed" },
         { pattern = "riding speed", trigger = "mounted", kind = "mount speed" },
@@ -57,15 +62,18 @@ local function SuggestionKey(match)
 end
 
 -- Is this item already covered by a rule or ignored?
+-- Returns the rule covering this item, true if it was ignored, or nil.
 local function known(item)
     for _, r in ipairs(ns.Engine.state.rules) do
-        if Planner.RuleMatches(r, item) then return true end
+        if Planner.RuleMatches(r, item) then return r end
     end
     local ignored = ns.gdb.ignoredSuggestions
     if ignored["i:" .. item.itemID] then return true end
     if item.enchantID ~= 0 and ignored["e:" .. item.enchantID] then return true end
-    return false
+    return nil
 end
+
+local covered -- during a manual scan: { [item string] = { link, rule } }
 
 -- Zone limits written on the item (DESIGN.md §5.5, §7.2):
 --   "... in Desert areas."              -> zone group "desert"
@@ -171,7 +179,14 @@ local function supported(itemID)
 end
 
 local function consider(item, getTooltip)
-    if not supported(item.itemID) or known(item) then return end
+    if not supported(item.itemID) then return end
+    local rule = known(item)
+    if rule then
+        if covered and type(rule) == "table" and not covered[item.str] then
+            covered[item.str] = { link = item.link, rule = rule }
+        end
+        return
+    end
     local result = cache[item.str]
     if result == nil then
         result = analyse(item, getTooltip())
@@ -202,6 +217,7 @@ function Discovery:Scan(manual)
         return
     end
     if not ns.gdb or not ns.Engine.state.ready then return end
+    covered = manual and {} or nil
     local found = 0
     for bag = API.FirstBag(), API.LastBag() do
         for slot = 1, API.GetBagSlots(bag) do
@@ -238,6 +254,22 @@ function Discovery:Scan(manual)
         local total = #order
         ns.Print(total > 0 and (total .. " possible speed item(s); see the Suggestions list (/ac).")
             or "No new speed items found in your bags or gear.")
+        -- Items a rule already handles are never suggested; say so, so it
+        -- doesn't look like they were missed.
+        local list = {}
+        for _, c in pairs(covered) do list[#list + 1] = c end
+        table.sort(list, function(a, b) return (a.link or "") < (b.link or "") end)
+        if #list > 0 then
+            ns.Print("Already handled by a rule (not suggested):")
+            for i, c in ipairs(list) do
+                if i > 8 then
+                    ns.Print("  ...and " .. (#list - 8) .. " more.")
+                    break
+                end
+                ns.Print("  " .. (c.link or "?") .. " - " .. ns.Engine:RuleLabel(c.rule))
+            end
+        end
+        covered = nil
     end
     ns:Fire("AC_SUGGESTIONS")
 end

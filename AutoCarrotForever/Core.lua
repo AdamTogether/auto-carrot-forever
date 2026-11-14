@@ -140,6 +140,15 @@ function API.GetItemInfoInstant(item)
     return GetItemInfoInstant(item)
 end
 
+-- Bind type from item info (Enum.ItemBind): 0 = never binds (most white and
+-- grey items), 1 = on pickup, 2 = on equip, 3 = on use, 4 = quest, ...
+-- nil while the item is not in the client cache.
+API.BIND_NONE = (Enum and Enum.ItemBind and Enum.ItemBind.None) or 0
+
+function API.GetBindType(item)
+    return (select(14, API.GetItemInfo(item)))
+end
+
 function API.GetItemSpell(item)
     if C_Item and C_Item.GetItemSpell then
         return C_Item.GetItemSpell(item)
@@ -260,6 +269,28 @@ function API.GetSpeedPercent()
     return pct(current), pct(run), pct(swim)
 end
 
+-- The permanent enchant's name from an item link's tooltip, e.g. "Mithril
+-- Spurs" from the line "Enchanted: Mithril Spurs". nil if there is none or the
+-- tooltip isn't available.
+function API.GetEnchantName(link)
+    if type(link) ~= "string" or not (C_TooltipInfo and C_TooltipInfo.GetHyperlink) then return nil end
+    local ok, data = pcall(C_TooltipInfo.GetHyperlink, link)
+    if not ok or not data or not data.lines then return nil end
+    local enchantType = Enum and Enum.TooltipDataLineType and Enum.TooltipDataLineType.ItemEnchantmentPermanent
+    -- "Enchanted: %s" -> "^Enchanted: (.+)$" (localized when the global exists)
+    local prefix = (type(ENCHANTED_TOOLTIP_LINE) == "string" and ENCHANTED_TOOLTIP_LINE:match("^(.-)%%s")) or "Enchanted: "
+    for _, line in ipairs(data.lines) do
+        local text = line.leftText
+        if type(text) == "string" and not API.IsSecret(text) then
+            if text:sub(1, #prefix) == prefix then
+                return (text:sub(#prefix + 1):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""))
+            end
+            if enchantType and line.type == enchantType then return text end
+        end
+    end
+    return nil
+end
+
 function API.IsSecret(value)
     return issecretvalue ~= nil and issecretvalue(value) or false
 end
@@ -277,7 +308,7 @@ local GLOBAL_DEFAULTS = {
 }
 
 local CHAR_DEFAULTS = {
-    version = 2,
+    version = 3,
     enabled = true,
     instanceTypes = { party = false, raid = false, pvp = false, arena = false, scenario = false },
     wasAutoDisabled = false,
@@ -288,7 +319,7 @@ local CHAR_DEFAULTS = {
     neverSwapOnUse = false,
     chatSuggestions = true,
     debug = false,
-    button = { shown = false, scale = 1.0 },
+    button = { shown = true, scale = 1.0 },
     minimap = { hide = false, angle = 225 },
     builtins = {},
     saved = {},
@@ -350,6 +381,11 @@ local CHAR_MIGRATIONS = {
     -- 2: the Flying trigger was removed (no flying in Forever).
     [2] = function(db)
         if db.restoreDelay then db.restoreDelay.flying = nil end
+    end,
+    -- 3: the toggle button is shown by default now (it was hidden). Runs once,
+    -- so hiding it again afterwards sticks.
+    [3] = function(db)
+        if db.button then db.button.shown = true end
     end,
 }
 
@@ -428,12 +464,13 @@ local function printHelp()
     ns.Print("  /ac addset <pieces needed> <link> <link> [<link>...] [trigger,trigger]")
     ns.Print("  /ac remove <link|id|rule#>")
     ns.Print("  /ac list | scan | restore | options")
+    ns.Print("  /ac check <link> - why an item is or isn't swapped (enchant ID, binding, rules)")
     ns.Print("  /ac lock <slot> | unlock <slot>")
     ns.Print("  /ac zone [add|remove <group>] - current zone and zone groups (e.g. desert)")
     ns.Print("  /ac speed - current movement speed, to test zone items")
     ns.Print("  /ac button 0|1|reset|scale <n>")
     ns.Print("  /ac debug 0|1 (" .. onOff(db.debug) .. ")")
-    ns.Print("  Triggers: " .. table.concat(ns.TRIGGER_ORDER, ", "))
+    ns.Print("  Triggers: " .. table.concat(ns.TRIGGER_ORDER, ", ") .. " (always = whenever AutoCarrot is on)")
     ns.Print("  /ac speed - current movement speed (to test zone items)")
 end
 
@@ -523,6 +560,13 @@ local function handleSlash(msg)
         if not target then ns.Print("Usage: /ac remove <link|id|rule#>") return end
         local n = ns.Engine:RemoveCustomRulesMatching(target)
         ns.Print(n > 0 and ("Removed " .. n .. " rule(s).") or "No matching custom rule.")
+    elseif cmd == "check" then
+        local target = link or args[1]
+        if not target then
+            ns.Print("Usage: /ac check <shift-click an item>")
+            return
+        end
+        ns.Engine:CheckItem(target)
     elseif cmd == "list" then
         ns.Engine:PrintRules()
     elseif cmd == "scan" then

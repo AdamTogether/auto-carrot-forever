@@ -16,26 +16,36 @@ local COST_SLOTS = { 11, 12, 13, 14 }
 -- Triggers (DESIGN.md §6.3)
 --------------------------------------------------------------------------------
 
+-- label:  short text for buttons ("When: ...")
+-- menu:   longer text for menus (defaults to label)
+-- phrase: used in sentences, "Swap in X <phrase>"
+-- The keys ("always", ...) are saved data and slash-command words; only the
+-- player-facing text says what they mean.
 ns.TRIGGERS = {
     mounted = {
-        label = "Mounted",
+        label = "Mounted", phrase = "while mounted",
         test = function() return IsMounted() and not UnitOnTaxi("player") end,
     },
     swimming = {
-        label = "Swimming", polled = true,
+        label = "Swimming", phrase = "while swimming", polled = true,
         test = function() return IsSwimming() end,
     },
     submerged = {
-        label = "Underwater", polled = true,
+        label = "Underwater", phrase = "while underwater", polled = true,
         test = function() return IsSubmerged ~= nil and IsSubmerged() end,
     },
     resting = {
-        label = "Resting (cities/inns)",
+        label = "Resting (cities/inns)", phrase = "while resting in a city or inn",
         test = function() return IsResting() end,
     },
+    -- "Always" means: whenever AutoCarrot is turned on. Turning AutoCarrot off
+    -- (minimap/toggle button, /ac off) puts the normal gear back.
     always = {
-        label = "Always",
-        warning = "Armor cannot be swapped in combat, so this item stays on during fights.",
+        label = "Always (while on)",
+        menu = "Always, while AutoCarrot is on",
+        phrase = "whenever AutoCarrot is on",
+        warning = "Worn whenever AutoCarrot is turned on (and you are in this rule's zones), including during fights, " ..
+            "because armor can't be swapped in combat. Turn AutoCarrot off to put your normal gear back.",
         test = function() return true end,
     },
 }
@@ -221,6 +231,17 @@ function Engine:IsSpeedItem(item)
     return false
 end
 
+-- Display name for an enchant rule: the stored label ("Mithril Spurs"), or
+-- read from the item the rule was made from (and remembered), or "#464".
+function Engine:EnchantLabel(c)
+    local label = c.label and (c.label:gsub("^[Ee]nchanted:%s*", ""))
+    if (not label or label == "") and c.link then
+        label = API.GetEnchantName(c.link)
+        if label then c.label = label end -- backfill rules saved without a name
+    end
+    return (label and label ~= "") and label or ("#" .. tostring(c.match.enchantID))
+end
+
 function Engine:RuleLabel(rule)
     local c = rule.entry or rule
     if rule.name then return rule.name end
@@ -233,8 +254,7 @@ function Engine:RuleLabel(rule)
         return (c.label or "Set") .. " (" .. (c.need or 2) .. " of: " .. table.concat(names, ", ") .. ")"
     end
     if c.match and c.match.enchantID then
-        local label = c.label and c.label:gsub("^[Ee]nchanted:%s*", "")
-        return "enchant " .. (label or ("#" .. c.match.enchantID))
+        return "enchant " .. self:EnchantLabel(c)
     end
     local itemID = c.match and c.match.itemID
     local name, link = API.GetItemInfo(itemID or 0)
@@ -277,26 +297,71 @@ function Engine:ScanInventory()
     return inv
 end
 
-function Engine:HasMatch(inv, match)
+-- May this bag item be equipped for this rule without an unwanted bind?
+--   * already soulbound                         -> yes
+--   * never binds (bind type None: most white
+--     items, e.g. enchanted Knitted Sandals kept
+--     unbound to share between alts)            -> yes
+--   * Bind on Equip/Use, not bound yet          -> only if the rule allows
+--     binding and the player didn't decline the client's prompt
+-- Returns ok, reason ("bind" | "uncached"). Silent: HasMatch decides whether
+-- to tell the player. Checked before planning (via HasMatch), so a rule that
+-- can't equip anything never claims a slot ahead of one that can (§6.6).
+function Engine:CanEquipFromBags(item, rule)
+    if item.isBound then return true end
+    local bindType = API.GetBindType(item.link)
+    if bindType == nil then
+        -- Not cached yet: ask for it and re-check when it arrives.
+        API.LoadItem(item.itemID, function() Engine:Request() end)
+        return false, "uncached"
+    end
+    if bindType == API.BIND_NONE then return true end
+    if rule and rule.allowBind and not state.bindAsked[rule.id] then return true end
+    return false, "bind"
+end
+
+function Engine:WarnBind(rule, item)
+    if rule.source == "custom" then
+        self:WarnOnce("bind:" .. rule.id, (item.link or "An item") ..
+            " would become soulbound. Tick 'Allow binding' (the Bind box) for its rule in the item editor (/ac) to allow it.")
+    else
+        self:WarnOnce("bind:" .. rule.id, (item.link or rule.name or "An item") ..
+            " would become soulbound, so the built-in rule skips it. Equip it once by hand, " ..
+            "or add it as a custom item with 'Allow binding' ticked.")
+    end
+end
+
+-- rule: when given, bag items only count if CanEquipFromBags allows them.
+-- Worn items always count (they are already on, so already bound or bind-free).
+-- The bind message is shown only when no copy at all is usable, so owning a
+-- white pair and an unbound BoE pair equips the white pair without a warning.
+function Engine:HasMatch(inv, match, rule)
     for _, it in pairs(inv.equipped) do
         if Planner.Matches(match, it) then return true end
     end
+    local blocked
     for _, it in ipairs(inv.bags) do
-        if Planner.Matches(match, it) then return true end
+        if Planner.Matches(match, it) then
+            if not rule then return true end
+            local ok, reason = self:CanEquipFromBags(it, rule)
+            if ok then return true end
+            if reason == "bind" then blocked = blocked or it end
+        end
     end
+    if blocked then self:WarnBind(rule, blocked) end
     return false
 end
 
 function Engine:Has(inv, rule)
     if rule.pieces then return #self:UsablePieces(inv, rule) >= (rule.need or 2) end
-    return self:HasMatch(inv, rule.match)
+    return self:HasMatch(inv, rule.match, rule)
 end
 
 -- Set pieces this character owns and can wear.
 function Engine:UsablePieces(inv, rule)
     local list = {}
     for _, p in ipairs(rule.pieces) do
-        if #p.slots > 0 and self:HasMatch(inv, p.match) and API.MeetsLevel(p.match.itemID) then
+        if #p.slots > 0 and self:HasMatch(inv, p.match, rule) and API.MeetsLevel(p.match.itemID) then
             list[#list + 1] = p
         end
     end
@@ -639,25 +704,14 @@ end
 
 function Engine:EquipRule(rule, slot, inv)
     local db = ns.db
-    local item = self:FindInBags(inv, function(it) return Planner.Matches(rule.match, it) end)
+    -- Only copies this rule may equip (bound, bind-free, or binding allowed).
+    local item = self:FindInBags(inv, function(it)
+        return Planner.Matches(rule.match, it) and self:CanEquipFromBags(it, rule)
+    end)
     if not item then return false end
     if item.isLocked then
         self:RetryLater(0.5)
         return false
-    end
-
-    if not item.isBound then
-        if rule.source ~= "custom" then
-            self:WarnOnce("bind:" .. rule.id, (item.link or rule.name) ..
-                " is not soulbound yet. Equip it once by hand to bind it, then AutoCarrot will swap it.")
-            return false
-        end
-        if not rule.allowBind then
-            self:WarnOnce("bind:" .. rule.id, (item.link or "Item") ..
-                " would become soulbound. Tick 'Allow binding' for it in the item list (/ac) to allow.")
-            return false
-        end
-        if state.bindAsked[rule.id] then return false end
     end
 
     -- Slots the client will empty as a side effect (two-handers, §6.9).
@@ -1018,6 +1072,10 @@ function Engine:AddCustomRule(spec)
     for _, z in ipairs(spec.zones or {}) do
         if z.group then self:GroupZones(z.group) end -- create "<x> areas" groups on first use
     end
+    -- Enchant rules are labelled with the enchant's name ("Mithril Spurs"),
+    -- read from the tooltip of the item they were made from.
+    local label = spec.label and (spec.label:gsub("^[Ee]nchanted:%s*", ""))
+    if spec.byEnchant and not label and parsed then label = API.GetEnchantName(input) end
     local entry = {
         id = gdb.nextRuleId,
         match = match,
@@ -1030,7 +1088,7 @@ function Engine:AddCustomRule(spec)
         noInstance = false,
         zones = spec.zones,
         link = parsed and input or nil,
-        label = spec.label,
+        label = label,
     }
     gdb.nextRuleId = gdb.nextRuleId + 1
     table.insert(gdb.custom, entry)
@@ -1312,6 +1370,65 @@ end
 
 function Engine:IsPending()
     return state.blocked ~= nil and (self:PendingRestores() > 0 or next(state.plan) ~= nil)
+end
+
+local function UI_TriggerText(triggers)
+    local parts = {}
+    for _, key in ipairs(ns.TRIGGER_ORDER) do
+        if triggers[key] then parts[#parts + 1] = ns.TRIGGERS[key].label end
+    end
+    return #parts > 0 and table.concat(parts, "/") or "never"
+end
+
+-- /ac check: explain how the engine sees one item (DESIGN.md §8.5).
+function Engine:CheckItem(input)
+    local item = Planner.ParseItemString(input)
+    if not item and tonumber(input) then item = Planner.ParseItemString("item:" .. tonumber(input)) end
+    if not item then
+        ns.Print("Not an item link or item ID: " .. tostring(input))
+        return
+    end
+    self:BuildRules()
+    local _, link = API.GetItemInfo(item.itemID)
+    item.link = Planner.ParseItemString(input) and input or link
+    local _, _, _, equipLoc = API.GetItemInfoInstant(item.itemID)
+    local bindType = API.GetBindType(item.link or item.itemID)
+    local bindText = { [0] = "never binds", [1] = "bind on pickup", [2] = "bind on equip", [3] = "bind on use", [4] = "quest item" }
+    ns.Print((item.link or ("item " .. item.itemID)) .. ":")
+    ns.Print(string.format("  item ID %d, enchant ID %s, slot type %s", item.itemID,
+        item.enchantID ~= 0 and tostring(item.enchantID) or "none", tostring(equipLoc or "?")))
+    -- Where is it, and is that copy bound?
+    local inv = self:ScanInventory()
+    local where, bagCopy
+    for s, it in pairs(inv.equipped) do
+        if it.key == item.key then where = "equipped (" .. (ns.SLOT_NAMES[s] or s) .. ")" end
+    end
+    for _, it in ipairs(inv.bags) do
+        if not where and it.key == item.key then
+            where = "in your bags, " .. (it.isBound and "soulbound" or "not soulbound")
+            bagCopy = it
+        end
+    end
+    ns.Print("  " .. (where or "not in your bags or gear") .. "; " ..
+        (bindType and (bindText[bindType] or ("bind type " .. bindType)) or "bind type unknown (item not cached yet)"))
+    local any = false
+    for _, r in ipairs(state.rules) do
+        if Planner.RuleMatches(r, item) then
+            any = true
+            local status = self:RuleStatus(r.id)
+            if r.overridden then status = "overridden by a custom rule" end
+            if bagCopy and not r.overridden then
+                local ok, reason = self:CanEquipFromBags(bagCopy, r)
+                status = status .. (ok and ", this copy can be swapped" or
+                    (reason == "bind" and ", |cffff5050skipped: it would become soulbound|r" or ", item info still loading"))
+            end
+            ns.Print("  matched by: " .. self:RuleLabel(r) .. " (" .. (r.source == "custom" and "custom" or "built-in") ..
+                ", " .. UI_TriggerText(r.triggers) .. ", " .. status .. ")")
+        end
+    end
+    if not any then
+        ns.Print("  |cffffd100No rule matches it.|r Add it with /ac (drag it onto the editor; tick 'Match the enchant' for an enchanted item).")
+    end
 end
 
 function Engine:PrintRules()

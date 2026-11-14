@@ -168,7 +168,7 @@ local function CreateAddBar(f)
         local entries = { { text = "Active when any of these is true", isTitle = true } }
         for _, key in ipairs(ns.TRIGGER_ORDER) do
             entries[#entries + 1] = {
-                text = ns.TRIGGERS[key].label,
+                text = ns.TRIGGERS[key].menu or ns.TRIGGERS[key].label,
                 checked = function() return pending.triggers[key] == true end,
                 func = function()
                     pending.triggers[key] = (not pending.triggers[key]) or nil
@@ -259,8 +259,7 @@ local function ruleName(c)
     end
     if c.match.enchantID then
         -- Labels come from the tooltip line, e.g. "Enchanted: Minor Speed".
-        local label = c.label and c.label:gsub("^[Ee]nchanted:%s*", "")
-        return "Enchant: " .. (label or ("#" .. c.match.enchantID)), c.link
+        return "Enchant: " .. ns.Engine:EnchantLabel(c), c.link
     end
     local name, link, quality = API.GetItemInfo(c.match.itemID)
     if not name then
@@ -361,7 +360,7 @@ local function CreateRuleRow(parent)
         local entries = { { text = "Active when any of these is true", isTitle = true } }
         for _, key in ipairs(ns.TRIGGER_ORDER) do
             entries[#entries + 1] = {
-                text = ns.TRIGGERS[key].label,
+                text = ns.TRIGGERS[key].menu or ns.TRIGGERS[key].label,
                 checked = function() return c.triggers[key] == true end,
                 func = function()
                     c.triggers[key] = (not c.triggers[key]) or nil
@@ -374,6 +373,7 @@ local function CreateRuleRow(parent)
     row.trigger:SetPoint("LEFT", 310, 0)
     UI.SetTooltip(row.trigger, function(tt)
         tt:SetText("When this item is worn", 1, 1, 1)
+        tt:AddLine("Only while AutoCarrot is turned on. Turning it off puts your normal gear back.", 0.8, 0.8, 0.8, true)
         if row.entry.triggers.always then
             tt:AddLine(ns.TRIGGERS.always.warning, 1, 0.82, 0, true)
         end
@@ -413,7 +413,8 @@ local function CreateRuleRow(parent)
         function(v) row.entry.noInstance = v; edited(row.entry) end)
     row.noInstance:SetPoint("LEFT", 618, 0)
 
-    row.bind = UI.CreateCheck(row, nil, "Allow binding: let AutoCarrot equip this item even if it is not soulbound yet (the game will ask you to confirm once).",
+    row.bind = UI.CreateCheck(row, nil, "Allow binding: let AutoCarrot equip a Bind on Equip item that isn't soulbound yet (the game asks you to confirm once). " ..
+        "Not needed for items that never bind, such as most white items: those are always swapped.",
         function(v) row.entry.allowBind = v; edited(row.entry) end)
     row.bind:SetPoint("LEFT", 642, 0)
 

@@ -15,7 +15,7 @@ A fork of **[AutoCarrot](https://www.curseforge.com/members/kebabstorm/projects)
 - **Zone-aware.** Items such as The Desert Rose only work in certain zones. Zone groups (for example *Desert areas*) can be edited in game as players discover which zones count.
 - **Your own items.**
   - Add any armor, ring, trinket, cloak or weapon, any item carrying a given enchant, or a whole set.
-  - Choose when it's worn (mounted, swimming, underwater, resting or always), which slot it goes in and which zones it works in.
+  - Choose when it's worn (mounted, swimming, underwater, resting, or **Always**, meaning whenever AutoCarrot is turned on), which slot it goes in and which zones it works in.
   - Custom items are shared by all your characters.
 - **Speed-item suggestions.** Items in your bags whose tooltip mentions mount, swim or movement speed are suggested, with **[Add]** links in chat.
 - **Live speed readout.** Hover the minimap or toggle button to see your current, mounted or run, and swim speed. It updates every 0.5 seconds, and only while hovered.
@@ -28,10 +28,10 @@ A fork of **[AutoCarrot](https://www.curseforge.com/members/kebabstorm/projects)
 | The Desert Rose | +7% mount speed | Mounted, in *Desert areas* |
 | Wintersaber Hide Lined Gloves | +6% while mounted | Mounted, in Winterspring |
 | Riding Skill glove enchant (#930), Mithril Spurs boot enchant (#464) | Mount speed | Mounted. Matched by **enchant**, so Forever's plain "Riding Gloves" item (no speed) is never used |
-| Agamaggan's Clutch | +3% movement speed | In The Barrens, Thousand Needles, Razorfen Kraul and Razorfen Downs |
-| Blessing of Kalimdor set (any 2 pieces) | +5% movement speed | In The Barrens and Stonetalon Mountains |
+| Agamaggan's Clutch | +3% movement speed | Whenever AutoCarrot is on, in The Barrens, Thousand Needles, Razorfen Kraul and Razorfen Downs |
+| Blessing of Kalimdor set (any 2 pieces) | +5% movement speed | Whenever AutoCarrot is on, in The Barrens and Stonetalon Mountains |
 | Rider of the Plaguelands set (any 2 pieces) | +5% while mounted | Mounted, in Eastern and Western Plaguelands. The ring and cloak are preferred over the sword |
-| Staff of Westfall, Forsaken Greataxe, Gnarled Necromancer's Staff | +2% movement speed in their zones | **Off by default**: putting your real weapon back at the start of a fight costs a global cooldown |
+| Staff of Westfall, Forsaken Greataxe, Gnarled Necromancer's Staff | +2% movement speed | Whenever AutoCarrot is on, in their zones. **Off by default**: putting your real weapon back at the start of a fight costs a global cooldown |
 
 **Desert areas** defaults to Tanaris, Silithus, Desolace and Westfall. Desolace and Westfall are confirmed in game. Blizzard doesn't publish the list, so add or remove zones in the options as you test them.
 
@@ -55,7 +55,7 @@ None of 3.01's Riding Crop, Skybreaker Whip, swim belt or swim helm exist in For
   - right-click opens the item editor
   - Shift-click opens the options
   - drag to move it around the minimap
-- **Toggle button** (optional, `/ac button 1`): the same clicks. Hold **Alt** and drag to move it; its position is remembered without Edit Mode.
+- **Toggle button** (shown by default): the carrot button turns AutoCarrot on (green) or off (red). Turning it off puts your normal gear back, including items set to Always. Right-click opens the editor. Hold **Alt** and drag to move it; its position is remembered without Edit Mode. Hide it in the options or with `/ac button 0`.
 
 ## Development
 

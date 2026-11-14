@@ -158,7 +158,8 @@ local function Build()
 
     local page = NewPage(content)
 
-    page:Checkbox("Enabled", "Automatically equip speed gear.",
+    page:Checkbox("Enabled", "Turn AutoCarrot on or off. While it is on, speed gear is swapped in automatically, " ..
+        "including items set to Always. Turning it off puts your normal gear back.",
         function() return db.enabled end,
         function(v) ns.Engine:SetEnabled(v) end)
 
@@ -176,7 +177,7 @@ local function Build()
     page:Header("Built-in items")
     for _, b in ipairs(ns.BUILTINS) do
         local where = b.zones and (", only in " .. ns.Engine:ZoneLabel(b.zones)) or ""
-        local tooltip = "Swap in " .. b.name .. " (" .. UI.TriggerText({ [b.trigger] = true }):lower() .. where .. ")."
+        local tooltip = "Swap in " .. b.name .. " " .. UI.TriggerPhrase({ [b.trigger] = true }) .. where .. "."
         if b.twoHand then
             tooltip = tooltip .. " Off by default: the real weapon goes back on as soon as combat starts, which costs a global cooldown at the start of a fight."
         end
