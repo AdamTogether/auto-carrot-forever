@@ -286,7 +286,10 @@ end
 
 function Discovery:Schedule()
     if scanTimer or disabled then return end
-    local delay = math.max(THROTTLE, quietUntil - GetTime())
+    -- Gear swaps only move items we've already seen; don't scan in the middle
+    -- of one (mount/dismount churn) - wait until a few seconds after.
+    local sinceSwap = GetTime() - (ns.Engine.state.lastSwapAt or 0)
+    local delay = math.max(THROTTLE, quietUntil - GetTime(), 5 - sinceSwap)
     if delay == math.huge then return end
     scanTimer = C_Timer.NewTimer(delay, function()
         scanTimer = nil
@@ -374,5 +377,4 @@ ns:On("PLAYER_LOGIN", function()
 end)
 
 ns:On("BAG_UPDATE_DELAYED", function() Discovery:Schedule() end)
-ns:On("PLAYER_EQUIPMENT_CHANGED", function() Discovery:Schedule() end)
 ns:On("AC_RULES", function() Discovery:Schedule() end)

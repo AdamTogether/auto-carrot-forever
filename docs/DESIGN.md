@@ -384,7 +384,17 @@ A slot counts as **managed** if any rule targets it, or if `slotOwner[slot]` is 
 
 **Hand-over between rules:** say a custom swim trinket and the Carrot both use trinket slot 14, and you ride into water. Slot 14 goes Carrot → swim trinket → normal trinket. `saved[14]` keeps the *normal* trinket throughout. A speed item is never recorded as the item to restore (§5.1).
 
-**One equip at a time.** Equipping is asynchronous: the item is locked until `PLAYER_EQUIPMENT_CHANGED` / `ITEM_LOCK_CHANGED` fires. So each `Refresh()` starts **at most one** equip or restore. The equipment-change event then triggers the next `Refresh()`, which handles the next slot. This avoids "Item is locked" errors and races between two slots that want the same bag space.
+**Batched swaps, then wait.** Equipping is asynchronous: items stay locked until the client confirms the change with `PLAYER_EQUIPMENT_CHANGED`. `Refresh()` therefore sends **every swap that can safely run together in the same frame**, then waits until all of them are confirmed, or time out, before doing anything else.
+
+A swap can join a batch if it uses `EquipItemByName` (no cursor), pushes no other hand off (no two-hander), and cannot raise a bind prompt. Anything else runs on its own on the next pass, after the batch has landed: the cursor fallback, unequipping into an empty bag slot, two-hander and off-hand swaps, and Bind on Equip items.
+
+**Why batch:** each gear change is expensive *outside* this addon. The client refreshes paper-doll stats, the character model and action-bar buttons. Forever has a known bug where equippable items or `/equip` macros on the action bars make every such update stutter: [forever-bugs #312](https://github.com/ClassicWoWCommunity/forever-bugs/issues/312). Other addons also rescan gear and bags. Version 4.0.0 swapped one slot per event round trip, so mounting with two speed trinkets, riding gloves and spurs caused about four separate hitches. Batched, they share one frame and a single `BAG_UPDATE_DELAYED`.
+
+Also to keep the addon's own share small:
+- **While swaps are waiting,** `Refresh()` returns before doing any work.
+- **`ITEM_LOCK_CHANGED` is not listened to.** It fires many times per swap, and the half-second retry already covers locked items.
+- **Discovery doesn't rescan on equipment changes** (swaps only move items it has already seen), and it holds automatic scans until 5 seconds after the last swap.
+- **With `/ac debug 1`,** any `Refresh()` that takes longer than 2 ms is reported, so a hitch can be blamed on the right component.
 
 ### 6.2 Equipping
 
@@ -423,7 +433,7 @@ Triggers live in a table, `ns.TRIGGERS[key] = { test, polled, label, menu, phras
 | `PLAYER_REGEN_ENABLED` | Combat ended: finish deferred swaps at once, ignoring `restoreDelay` (§6.6) |
 | `PLAYER_ALIVE`, `PLAYER_UNGHOST` | Resurrected: finish swaps deferred while dead |
 | `PLAYER_ENTERING_WORLD`, `ZONE_CHANGED_NEW_AREA` | Loading screens, instance check (see "login" below) |
-| `BAG_UPDATE_DELAYED`, `PLAYER_EQUIPMENT_CHANGED`, `ITEM_LOCK_CHANGED` | Rebuild the inventory cache. Continue a chain of single equips (§6.1) |
+| `BAG_UPDATE_DELAYED`, `PLAYER_EQUIPMENT_CHANGED` | Confirm swaps that were sent; refresh once a batch has fully landed (§6.1). `ITEM_LOCK_CHANGED` is deliberately not used |
 | `PLAYER_UPDATE_RESTING` | Resting changes |
 | `ZONE_CHANGED_NEW_AREA`, `ZONE_CHANGED`, `ZONE_CHANGED_INDOORS` | Zone conditions (§5.5) |
 | `TRADE_CLOSED`, `MAIL_CLOSED`, `MERCHANT_CLOSED`, `LOOT_CLOSED`, `BANKFRAME_CLOSED` | Finish swaps deferred while those windows were open |

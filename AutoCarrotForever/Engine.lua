@@ -57,7 +57,8 @@ ns.TRIGGER_ORDER = { "mounted", "swimming", "submerged", "resting", "always" }
 
 local state = {
     ready = false,          -- false during loading screens / before bags are known
-    inFlight = nil,         -- the one equip or restore currently waiting for the client
+    flights = {},           -- [slot] = equip/restore sent to the client, waiting for confirmation
+    lastSwapAt = 0,         -- GetTime() of the last swap we started (Discovery stays quiet around it)
     flightToken = 0,
     plan = {},              -- [slot] = rule, from the last Refresh
     rules = {},             -- all rules, normalised
@@ -477,7 +478,10 @@ end
 -- every event (Forever pauses all Lua error reporting after 100 errors).
 local reportedErrors = {}
 
+local profile = debugprofilestop -- ms timer; nil on clients without it
+
 function Engine:Refresh()
+    local t0 = profile and profile()
     local ok, err = xpcall(function() return Engine:RefreshUnsafe() end, function(e)
         return tostring(e) .. "\n" .. (debugstack and debugstack(2) or "")
     end)
@@ -488,11 +492,20 @@ function Engine:Refresh()
             geterrorhandler()(err)
         end
     end
+    -- /ac debug 1: show when our own work is slow enough to notice, so a hitch
+    -- can be told apart from the client's (or another addon's) gear-change cost.
+    if t0 and ns.db and ns.db.debug then
+        local ms = profile() - t0
+        if ms > 2 then ns.Debug(string.format("Refresh took %.1f ms", ms)) end
+    end
 end
 
 function Engine:RefreshUnsafe()
     if not state.ready or not ns.db then return end
     local db = ns.db
+    -- Swaps already sent: wait for the client to confirm them all before doing
+    -- any more work (in combat the weapon pass below still has to run).
+    if next(state.flights) and not (InCombatLockdown() or UnitAffectingCombat("player")) then return end
 
     self:BuildRules()
 
@@ -513,7 +526,7 @@ function Engine:RefreshUnsafe()
         ns:Fire("AC_STATUS")
         return
     end
-    if state.inFlight then return end
+    if next(state.flights) then return end
 
     local inv = self:ScanInventory()
     local t = now()
@@ -581,6 +594,11 @@ function Engine:RefreshUnsafe()
         if not plan[s] then state.suppressed[s] = nil end
     end
 
+    -- Batching (DESIGN.md §6.1): every swap that can safely run alongside
+    -- others (EquipItemByName, no displaced hand, no bind prompt) is sent in
+    -- this same frame, so the client and other addons see one gear change
+    -- instead of one per slot. Anything else runs alone, as before.
+    local batching = false
     local nextWake
     for _, slot in ipairs(slots) do
         local wanted = plan[slot]
@@ -596,9 +614,13 @@ function Engine:RefreshUnsafe()
                     db.slotOwner[slot] = wanted.id -- hand-over; saved[slot] untouched
                 end
             elseif not self:Debounced(slot) then
-                if self:EquipRule(wanted, slot, inv) then
-                    ns:Fire("AC_STATUS")
-                    return
+                local started, batchable = self:EquipRule(wanted, slot, inv, batching)
+                if started then
+                    if not batchable then
+                        ns:Fire("AC_STATUS")
+                        return
+                    end
+                    batching = true
                 end
             end
         elseif owner and not state.failed["restore:" .. slot] and not self:CompanionBlocked(slot, plan) then
@@ -610,9 +632,15 @@ function Engine:RefreshUnsafe()
             end
             state.restoreAt[slot] = due
             if t >= due then
-                if not self:Debounced(slot) and self:Restore(slot, inv) then
-                    ns:Fire("AC_STATUS")
-                    return
+                if not self:Debounced(slot) then
+                    local started, batchable = self:Restore(slot, inv, batching)
+                    if started then
+                        if not batchable then
+                            ns:Fire("AC_STATUS")
+                            return
+                        end
+                        batching = true
+                    end
                 end
             else
                 nextWake = math.min(nextWake or math.huge, due - t)
@@ -620,6 +648,11 @@ function Engine:RefreshUnsafe()
         end
     end
 
+    if batching then
+        if nextWake then self:RetryLater(nextWake + 0.05) end
+        ns:Fire("AC_STATUS")
+        return
+    end
     if nextWake then
         self:RetryLater(nextWake + 0.05)
     else
@@ -647,7 +680,7 @@ end
 -- In combat armor is locked but weapons are not: put the real weapons back at
 -- once, main hand first, one swap per pass (each success triggers the next).
 function Engine:CombatWeaponPass()
-    if state.inFlight or not ns.db then return end
+    if next(state.flights) or not ns.db then return end
     if UnitIsDeadOrGhost("player") or isCasting() or GetCursorInfo() then return end
     if self:IsDisarmed() then
         self:RetryLater(1)
@@ -670,14 +703,24 @@ function Engine:StartFlight(flight)
     state.flightToken = state.flightToken + 1
     flight.token = state.flightToken
     flight.started = now()
-    state.inFlight = flight
+    state.flights[flight.slot] = flight
     state.lastEquipAt[flight.slot] = flight.started
-    local token = flight.token
+    state.lastSwapAt = flight.started
+    local token, slot = flight.token, flight.slot
     C_Timer.After(FLIGHT_TIMEOUT, function()
-        if state.inFlight and state.inFlight.token == token then
-            Engine:FlightFailed()
+        local f = state.flights[slot]
+        if f and f.token == token then
+            Engine:FlightFailed(f)
         end
     end)
+end
+
+-- Can this swap be sent in the same frame as others? Only the cursor-free
+-- EquipItemByName path, with no bind prompt possible.
+local function canBatch(item)
+    if state.useCursor or not API.CanEquipByName() then return false end
+    if item and not item.isBound and API.GetBindType(item.link) ~= API.BIND_NONE then return false end
+    return true
 end
 
 -- If the client refuses the swap, the item stays on the cursor; FlightFailed
@@ -702,7 +745,9 @@ function Engine:SendEquip(item, slot)
     return equipFromCursor(slot)
 end
 
-function Engine:EquipRule(rule, slot, inv)
+-- batchOnly: other swaps were already sent this frame, so only do this one if
+-- it can run alongside them. Returns started, batchable.
+function Engine:EquipRule(rule, slot, inv, batchOnly)
     local db = ns.db
     -- Only copies this rule may equip (bound, bind-free, or binding allowed).
     local item = self:FindInBags(inv, function(it)
@@ -726,6 +771,8 @@ function Engine:EquipRule(rule, slot, inv)
             " can't be equipped (the other hand needs somewhere to go).")
         return false
     end
+    local batchable = #displaced == 0 and canBatch(item)
+    if batchOnly and not batchable then return false end -- next pass, on its own
 
     -- Remember the normal item (DESIGN.md §5.1), never a speed item.
     local function remember(s)
@@ -756,7 +803,7 @@ function Engine:EquipRule(rule, slot, inv)
     db.lastSlot[rule.id] = slot
     ns.Debug("Equipping " .. (item.link or "?") .. " in slot " .. slot)
     self:StartFlight({ kind = "equip", slot = slot, ruleId = rule.id, match = rule.match })
-    return true
+    return true, batchable
 end
 
 function Engine:ClearSlot(slot)
@@ -766,7 +813,8 @@ function Engine:ClearSlot(slot)
     state.restoreAt[slot] = nil
 end
 
-function Engine:Restore(slot, inv)
+-- batchOnly / returns: as EquipRule.
+function Engine:Restore(slot, inv, batchOnly)
     local db = ns.db
     local saved = db.saved[slot]
     local current = inv.equipped[slot]
@@ -794,13 +842,14 @@ function Engine:Restore(slot, inv)
                 " stays equipped until a bag slot is free.")
             return false
         end
+        if batchOnly then return false end -- cursor path: never alongside other swaps
         state.warned["bagsfull:" .. slot] = nil
         PickupInventoryItem(slot)
         if not CursorHasItem() then return false end
         API.PickupBagItem(free.bag, free.slot)
         ns.Debug("Unequipping slot " .. slot .. " into bags")
         self:StartFlight({ kind = "restore", slot = slot, expectEmpty = true })
-        return true
+        return true, false
     end
 
     local want = Planner.ParseItemString(saved)
@@ -817,7 +866,7 @@ function Engine:Restore(slot, inv)
     for s, it in pairs(inv.equipped) do
         if s ~= slot and it.key == want.key then
             db.saved[slot] = false
-            return self:Restore(slot, inv)
+            return self:Restore(slot, inv, batchOnly)
         end
     end
 
@@ -840,13 +889,15 @@ function Engine:Restore(slot, inv)
         return false
     end
 
+    local batchable = canBatch(nil) -- normal gear was worn before: bound or bind-free
+    if batchOnly and not batchable then return false end
     if not self:SendEquip(item, slot) then
         self:CountFailure(nil, slot)
         return false
     end
     ns.Debug("Restoring " .. (item.link or "?") .. " to slot " .. slot)
     self:StartFlight({ kind = "restore", slot = slot, expectKey = item.key })
-    return true
+    return true, batchable
 end
 
 function Engine:CountFailure(ruleId, slot)
@@ -871,8 +922,7 @@ function Engine:CountFailure(ruleId, slot)
     self:RetryLater(DEBOUNCE)
 end
 
-function Engine:FlightFailed()
-    local f = state.inFlight
+function Engine:FlightFailed(f)
     -- The event may simply have been missed: check the slot before blaming anyone.
     local link = GetInventoryItemLink("player", f.slot)
     local current = link and Planner.ParseItemString(link)
@@ -882,29 +932,30 @@ function Engine:FlightFailed()
         self:FlightSucceeded(f)
         return
     end
-    state.inFlight = nil
-    if CursorHasItem() then ClearCursor() end
+    state.flights[f.slot] = nil
+    if CursorHasItem() and not next(state.flights) then ClearCursor() end
     ns.Debug("Swap in slot " .. f.slot .. " did not complete")
     self:CountFailure(f.kind == "equip" and f.ruleId or nil, f.slot)
 end
 
 function Engine:FlightSucceeded(f)
-    state.inFlight = nil
+    state.flights[f.slot] = nil
     if f.kind == "equip" then
         state.failures[f.ruleId] = nil
     else
         state.failures["restore:" .. f.slot] = nil
         self:ClearSlot(f.slot)
     end
-    self:Request()
+    -- One Refresh once the whole batch has landed, not one per slot.
+    if not next(state.flights) then self:Request() end
 end
 
 function Engine:OnEquipmentChanged(slot)
     if not ns.db or not slot then return end
     local link = GetInventoryItemLink("player", slot)
     local current = link and Planner.ParseItemString(link)
-    local f = state.inFlight
-    if f and f.slot == slot then
+    local f = state.flights[slot]
+    if f then
         local ok
         if f.kind == "equip" then
             ok = Planner.Matches(f.match, current)
@@ -940,13 +991,16 @@ function Engine:CheckManualChange(slot, current)
 end
 
 function Engine:OnBindConfirm()
-    local f = state.inFlight
-    if f and f.kind == "equip" then
-        -- Keep slotOwner: if the player accepts, the restore later still works;
-        -- if they decline, the normal item is still worn and Restore clears it.
-        state.bindAsked[f.ruleId] = true
-        state.inFlight = nil
-        ns.Debug("Client asked to confirm binding; waiting for the player")
+    -- Swaps that can prompt are never batched, so at most one equip is waiting.
+    for slot, f in pairs(state.flights) do
+        if f.kind == "equip" then
+            -- Keep slotOwner: if the player accepts, the restore later still works;
+            -- if they decline, the normal item is still worn and Restore clears it.
+            state.bindAsked[f.ruleId] = true
+            state.flights[slot] = nil
+            ns.Debug("Client asked to confirm binding; waiting for the player")
+            return
+        end
     end
 end
 
@@ -959,7 +1013,7 @@ function Engine:OnActionBlocked(addon, func)
     -- The event reports names like "PickupInventoryItem()" or "C_Item.EquipItemByName()".
     func = (tostring(func or "?"):gsub("%(%)$", ""))
     local short = func:match("([%w_]+)$") or func
-    state.inFlight = nil
+    wipe(state.flights)
     if CursorHasItem() then ClearCursor() end
     if short == "EquipItemByName" then
         if state.useCursor then state.equipBlocked = true else state.useCursor = true end
@@ -1320,7 +1374,7 @@ function Engine:RuleStatus(ruleId)
     local rule = state.rulesById[ruleId]
     if not rule or not rule.enabled then return "disabled" end
     for slot, owner in pairs(ns.db.slotOwner) do
-        if owner == ruleId and (not state.inFlight or state.inFlight.slot ~= slot) then return "worn" end
+        if owner == ruleId and not state.flights[slot] then return "worn" end
     end
     for _, r in pairs(state.plan) do
         if r.id == ruleId then return "planned" end
@@ -1512,7 +1566,7 @@ end)
 ns:On("PLAYER_ENTERING_WORLD", function()
     state.ready = false
     waitingForBags = true
-    state.inFlight = nil
+    wipe(state.flights)
     Engine:CheckInstance()
     C_Timer.After(2, markReady)
 end)
@@ -1564,7 +1618,6 @@ for _, event in ipairs({
     "PLAYER_UPDATE_RESTING",
     "PLAYER_ALIVE",
     "PLAYER_UNGHOST",
-    "ITEM_LOCK_CHANGED",
     "TRADE_CLOSED",
     "MAIL_CLOSED",
     "MERCHANT_CLOSED",
