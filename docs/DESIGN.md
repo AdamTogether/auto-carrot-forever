@@ -495,7 +495,10 @@ Other safety rules:
   - **Bind on Equip/Use, not bound yet**: only if the rule has `allowBind` (custom rules) and the player didn't decline the client's bind prompt.
 
   The check runs inside `Has()`, *before* the planner assigns slots, so a rule with no equippable copy never claims a slot ahead of one that has one. A bug in v4.0.0 had the built-in enchant rule claim hands or feet and then refuse a never-binding white item, so the player's own custom rule never got a turn. The equip step uses the same check to pick an allowed copy. A skipped BoE item prints one chat message per rule per session, telling the player how to allow it. Allowed BoE items go through `EquipItemByName`, so the client shows its own bind confirmation.
-- **Failure detection and back-off:** after an equip call, expect `PLAYER_EQUIPMENT_CHANGED` for that slot within 1.5 s. If it does not arrive, or `UI_ERROR_MESSAGE` reports a failure (wrong level, wrong armor type, "can't do that right now"), increase `failures[ruleId]`. After **3** failures the rule is marked failed until `/reload` or until the user edits it, with one chat message. This stops endless retry loops and red-error spam.
+- **Failure detection and back-off:** after an equip call, the engine expects `PLAYER_EQUIPMENT_CHANGED` for that slot within 1.5 s.
+  - **Interrupted swaps don't count.** If a cast started while the swap was waiting, or a guard now blocks it (casting, combat, dead, a blocking window), the swap is simply retried later. Example: crafting with "Create All" while dismounted, where the next craft starts in the split second between casts.
+  - **Real failures:** after 3, the rule or the restore of that slot is paused, with one chat message, and **retried automatically after 20 s**. It used to stay off until `/ac restore`. A paused restore leaves the speed item on until it succeeds.
+- **Cast queues settle first:** normal gear only goes back once **0.5 s** have passed since the player's last cast ended (`UNIT_SPELLCAST_*` for `player`). Back-to-back casts (crafting queues, gathering, buffing) therefore can't catch a swap between two casts. Swapping speed gear *in* (mounting, entering water) is not delayed.
 - **Debounce:** at most one equip per slot every 0.5 s.
 - **Bags full:** a restore needs a free bag slot for the speed item. If none is free, print a warning once per session and leave the speed item on. Retry on `BAG_UPDATE_DELAYED`.
 - **Saved item not in the bags:**
@@ -842,6 +845,7 @@ The rule-choice logic (`AssignSlots`, excludes, priority, the never-save-a-speed
 | 45 | Wintersaber gloves and a Riding Skill-enchanted pair, mounted in Winterspring | Wintersaber gloves (priority 110). Outside Winterspring: the enchanted pair |
 | 46 | Tooltip "(2) Set: Increases mount speed by 5% in Eastern and Western Plaguelands." | Set suggestion with zones Eastern Plaguelands and Western Plaguelands |
 | 47 | Unbound **white** Knitted Sandals with Mithril Spurs (and Woven Gloves with Riding Skill) in the bags, no custom rule, then mount | Built-in enchant rules equip them (they never bind). With a BoE copy instead: skipped with one message, and a custom rule with Allow binding equips it after the client's confirm |
+| 48 | Mounted with speed gear on, then use a profession's "Create All" (each craft dismounts or casts back-to-back) | No failure messages. Normal gear goes back about 0.5 s after the last craft finishes, with no `/ac restore` needed |
 
 ---
 

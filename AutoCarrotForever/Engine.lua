@@ -8,6 +8,9 @@ ns.Engine = Engine
 local FLIGHT_TIMEOUT = 1.5   -- seconds to wait for PLAYER_EQUIPMENT_CHANGED
 local MAX_FAILURES = 3
 local DEBOUNCE = 0.5         -- min seconds between equips on one slot
+local CAST_SETTLE = 0.5      -- seconds without casting before normal gear goes back
+                             -- (crafting "Create All" has only a split-second gap between casts)
+local FAILED_RETRY = 20      -- a slot/rule that failed 3 times is retried automatically after this
 local TICK = 0.25            -- polled trigger interval
 local TRINKET_SLOTS = { 13, 14 }
 local COST_SLOTS = { 11, 12, 13, 14 }
@@ -59,6 +62,9 @@ local state = {
     ready = false,          -- false during loading screens / before bags are known
     flights = {},           -- [slot] = equip/restore sent to the client, waiting for confirmation
     lastSwapAt = 0,         -- GetTime() of the last swap we started (Discovery stays quiet around it)
+    castStartedAt = 0,      -- GetTime() of the player's last cast/channel start
+    castEndedAt = 0,        -- ... and of the last cast/channel end (any outcome)
+    failedAt = {},          -- [ruleId | "restore:slot"] = GetTime() it was marked failed
     flightToken = 0,
     plan = {},              -- [slot] = rule, from the last Refresh
     rules = {},             -- all rules, normalised
@@ -503,6 +509,15 @@ end
 function Engine:RefreshUnsafe()
     if not state.ready or not ns.db then return end
     local db = ns.db
+    -- Failed slots and rules are not given up on for good: retry them after a
+    -- while (a craft queue, a vendor window or lag can make three tries fail).
+    for key, at in pairs(state.failedAt) do
+        if now() - at >= FAILED_RETRY then
+            state.failedAt[key], state.failed[key], state.failures[key] = nil, nil, nil
+            ns.Debug("Retrying " .. key .. " after an earlier failure")
+        end
+    end
+
     -- Swaps already sent: wait for the client to confirm them all before doing
     -- any more work (in combat the weapon pass below still has to run).
     if next(state.flights) and not (InCombatLockdown() or UnitAffectingCombat("player")) then return end
@@ -630,6 +645,11 @@ function Engine:RefreshUnsafe()
             elseif not due then
                 due = t + self:RestoreDelayFor(owner)
             end
+            -- Back-to-back casts (crafting "Create All", gathering) leave only a
+            -- split-second gap between casts; a swap sent then fails when the
+            -- next cast starts. Wait until no cast has ended for CAST_SETTLE.
+            local settled = state.castEndedAt + CAST_SETTLE
+            if due < settled then due = settled end
             state.restoreAt[slot] = due
             if t >= due then
                 if not self:Debounced(slot) then
@@ -905,19 +925,24 @@ function Engine:CountFailure(ruleId, slot)
     state.failures[key] = (state.failures[key] or 0) + 1
     if state.failures[key] >= MAX_FAILURES then
         state.failed[key] = true
+        state.failedAt[key] = now()
+        -- Retried automatically after FAILED_RETRY; tell the player once.
         if ruleId then
             local rule = state.rulesById[ruleId]
-            ns.Print("Could not equip " .. (rule and self:RuleLabel(rule) or ruleId) ..
-                " after " .. MAX_FAILURES .. " tries; skipping it until you edit the rule, /reload or /ac restore.")
+            self:WarnOnce("failed:" .. key, "Could not equip " .. (rule and self:RuleLabel(rule) or ruleId) ..
+                " after " .. MAX_FAILURES .. " tries; trying again in " .. FAILED_RETRY .. " seconds.")
             -- Put back whatever the failed attempts displaced.
             if ns.db.slotOwner[slot] == ruleId then
                 state.restoreAt[slot] = now()
             end
         else
-            ns.Print("Could not restore slot " .. slot .. " after " .. MAX_FAILURES ..
-                " tries. Use /ac restore to try again.")
+            local name = ns.SLOT_NAMES[slot] or ("slot " .. slot)
+            self:WarnOnce("failed:" .. key, "Could not put your normal " .. name:lower() .. " item back after " ..
+                MAX_FAILURES .. " tries; trying again in " .. FAILED_RETRY .. " seconds.")
         end
         ns:Fire("AC_RULES")
+        self:RetryLater(FAILED_RETRY + 0.1)
+        return
     end
     self:RetryLater(DEBOUNCE)
 end
@@ -934,6 +959,14 @@ function Engine:FlightFailed(f)
     end
     state.flights[f.slot] = nil
     if CursorHasItem() and not next(state.flights) then ClearCursor() end
+    -- Not our fault: a cast started while the swap was pending (crafting queue,
+    -- gathering), or the player is now casting, in combat, dead or in a
+    -- blocking window. Try again later without counting it as a failure.
+    if state.castStartedAt >= f.started or self:Blocker() then
+        ns.Debug("Swap in slot " .. f.slot .. " was interrupted; will retry")
+        self:RetryLater(CAST_SETTLE)
+        return
+    end
     ns.Debug("Swap in slot " .. f.slot .. " did not complete")
     self:CountFailure(f.kind == "equip" and f.ruleId or nil, f.slot)
 end
@@ -1067,6 +1100,7 @@ end
 function Engine:Resync()
     wipe(state.failed)
     wipe(state.failures)
+    wipe(state.failedAt)
     wipe(state.suppressed)
     wipe(state.warned)
     wipe(state.bindAsked)
@@ -1628,13 +1662,24 @@ for _, event in ipairs({
     ns:On(event, request)
 end
 
+-- Player casts: remember when they start and end, so swaps can wait for a
+-- cast queue to settle (CAST_SETTLE) and interrupted swaps aren't counted as
+-- failures.
+for _, event in ipairs({ "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_CHANNEL_START" }) do
+    ns:On(event, function() state.castStartedAt = now() end, "player")
+end
+
 for _, event in ipairs({
     "UNIT_SPELLCAST_STOP",
     "UNIT_SPELLCAST_CHANNEL_STOP",
     "UNIT_SPELLCAST_INTERRUPTED",
     "UNIT_SPELLCAST_FAILED",
+    "UNIT_SPELLCAST_SUCCEEDED",
 }) do
-    ns:On(event, request, "player")
+    ns:On(event, function()
+        state.castEndedAt = now()
+        request()
+    end, "player")
 end
 
 for _, event in ipairs({

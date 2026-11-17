@@ -2,7 +2,7 @@
 ## Title: AutoCarrot |cff7fbfffForever|r
 ## Notes: Automatically equips movement-speed gear (mount, swim, and custom items)
 ## Author: kebabstorm (original), AdamTogether (Forever fork)
-## Version: 4.0.12
+## Version: 4.0.13
 ## SavedVariables: AutoCarrotForeverGlobalDB
 ## SavedVariablesPerCharacter: AutoCarrotForeverDB
 ## IconTexture: 134010
