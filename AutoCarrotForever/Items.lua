@@ -67,8 +67,9 @@ end
 -- Built-in rules (DESIGN.md §3.4, §5.3). Mount-speed bonuses stack in Forever,
 -- so no built-in excludes another.
 --
--- Riding Crop, Skybreaker Whip, the swim belt and the swim helm from 3.01 do not
--- exist in Forever and are deliberately left out (DESIGN.md §12).
+-- Riding Crop, Skybreaker Whip and the swim helm from 3.01 do not exist in
+-- Forever and are deliberately left out (DESIGN.md §12). The swim belt (Azure
+-- Silk Belt, 7052) does exist and is built in below.
 --
 -- The two enchant rules match the ENCHANT ID only, never an item name. Forever
 -- has an item called "Riding Gloves" that gives no speed; it is not the 3.01
@@ -89,6 +90,15 @@ ns.BUILTINS = {
       trigger = "mounted", priority = 100 },
     { id = "mithrilSpurs", name = "Mithril Spurs boot enchant (#464)", match = { enchantID = 464 }, slots = { 8 },
       trigger = "mounted", priority = 100 },
+    -- Swim speed. Swimming is also true underwater.
+    -- "Equip: Increases swim speed by 15%." Bind on Equip: skipped (with one
+    -- message) until it has been worn once, like every built-in.
+    { id = "azureSilkBelt", name = "Azure Silk Belt", match = { itemID = 7052 }, slots = { 6 },
+      trigger = "swimming", priority = 100 },
+    -- "Equip: Swim speed increased by 33%." but also "Movement speed reduced by
+    -- 25%.": only ever worn while swimming, never on land.
+    { id = "cloakOfHermiticBliss", name = "Cloak of Hermitic Bliss", match = { itemID = 273084 }, slots = { 15 },
+      trigger = "swimming", priority = 100 },
     -- "Equip: Increases movement speed by 3% in The Barrens, Thousand Needles, Razorfen Kraul, and Razorfen Downs."
     { id = "agamaggansClutch", name = "Agamaggan's Clutch", match = { itemID = 6693 }, slots = { 11, 12 },
       trigger = "always", priority = 100,

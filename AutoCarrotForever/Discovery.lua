@@ -124,7 +124,9 @@ local function analyse(item, data)
             local lower = text:lower()
             local setNeed = lower:match("^%((%d+)%)")
             local isSetLine = setNeed ~= nil or startsWith(lower, PREFIX_SET)
+            -- Penalty lines ("Movement speed reduced by 25%") are not speed gear.
             local skip = startsWith(lower, PREFIX_USE) or startsWith(lower, PREFIX_PROC)
+                or lower:find("reduc") or lower:find("decreas") or lower:find("slow")
             if isSetLine and not skip then
                 -- Set bonus (DESIGN.md §5.6): suggest a set rule.
                 for _, p in ipairs(patterns) do

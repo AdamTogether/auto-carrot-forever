@@ -46,7 +46,7 @@ The fork does three things:
 | Swim belt | item 7052 | `IsSwimming()` | Waist (6) |
 | Swim helm | item 10506 | `IsSubmerged()` | Head (1) |
 
-> **In Forever** (confirmed in game): Riding Crop, Skybreaker Whip, the swim belt and the swim helm **do not exist**, so the fork keeps only the Carrot and the two enchant rules as built-ins (§3.4). Forever has an item named **"Riding Gloves"** that gives **no** speed. It is not the 3.01 riding-glove *enchant*, and rules never match items by name.
+> **In Forever** (confirmed in game): Riding Crop, Skybreaker Whip and the swim helm **do not exist**. The swim belt (**Azure Silk Belt**, 7052) does exist (+15% swim speed, +5 Stamina in Forever) and is built in again. Forever has an item named **"Riding Gloves"** that gives **no** speed. It is not the 3.01 riding-glove *enchant*, and rules never match items by name.
 
 - **Remembered gear:** `AutoCarrotDB.trinketId`, `handsLink`, `bootsLink`, `beltId` and `headId`.
 - **Finding the items:** a bag scan in the event handler ([AutoCarrot.lua:162-232](../AutoCarrot-3.01/AutoCarrot.lua#L162-L232)) runs on `PLAYER_ENTERING_WORLD`, `BAG_UPDATE` and `PLAYER_EQUIPMENT_CHANGED`. It finds which carrot or crop is available and which bag items have the riding-glove or spur enchant. If item 25653 or 32863 is present, the glove and spur enchants are ignored because the speed bonuses did not stack in that client. **In Forever, mount-speed bonuses from different items do stack** (confirmed in game), so the fork drops this exclusion (§5.3).
@@ -128,7 +128,9 @@ Results so far:
 | 3.01 built-in | In Forever? | Fork |
 |---|---|---|
 | Riding Crop (25653), Skybreaker Whip (32863) | **No** (confirmed) | Removed |
-| Swim belt (7052), swim helm (10506) | **No** (confirmed) | Removed. The swimming and underwater triggers stay for custom items |
+| Swim helm (10506) | **No** (confirmed) | Removed. The underwater trigger stays for custom items |
+| **Azure Silk Belt (7052)**, waist, Bind on Equip: "Increases swim speed by 15%." | **Yes** (found in game; first wrongly reported missing) | Built-in: swimming. Like every built-in it never binds the item, so an unbound belt is skipped with one message until worn once |
+| **Cloak of Hermitic Bliss (273084)**, back, Bind on Pickup, Kresh in Wailing Caverns: "Swim speed increased by 33%." **and** "Movement speed reduced by 25%." | **Yes** (found in game) | Built-in: **swimming only**, so the land-speed penalty never applies outside water. The swim restore delay (1 s) stops flapping at the surface |
 | Carrot on a Stick (11122) | Assumed yes | Built-in |
 | **Wintersaber Hide Lined Gloves (284266)**, hands, level 54: "Increases movement speed while mounted by 6% in Winterspring." | Yes (item databases) | Built-in: mounted + Winterspring, priority 110 (beats the 2% glove enchant) |
 | **Agamaggan's Clutch (6693)**, ring, level 30: "Increases movement speed by 3% in The Barrens, Thousand Needles, Razorfen Kraul, and Razorfen Downs." | Yes (item databases) | Built-in: always + those zones |
@@ -863,7 +865,7 @@ The rule-choice logic (`AssignSlots`, excludes, priority, the never-save-a-speed
 
 ## 12. Open questions
 
-1. **Built-in items in Forever:** do the Carrot (11122) and enchants 930 and 464 exist and still give mount speed? Riding Crop, Skybreaker Whip, the swim belt and the swim helm are confirmed missing (§3.4).
+1. **Built-in items in Forever:** do the Carrot (11122) and enchants 930 and 464 exist and still give mount speed? Riding Crop, Skybreaker Whip and the swim helm are confirmed missing (§3.4); the swim belt exists.
 2. **Level cap:** 3.01 stopped the mount swaps above level 70 because the Carrot stops working at higher levels. What is Forever's cap, and do the items have a level limit? The fork removes the hard-coded check. If a limit exists, it becomes a `maxLevel` field on the rule, read from the tooltip where possible.
 3. ~~**Flying:**~~ Answered: Forever has no flying mounts. There is no flying trigger (§6.3).
 4. **Weapon swap cost:** does a weapon swap in combat trigger a global cooldown in Forever, and does it reset the swing timer? This decides whether the weapon built-ins should stay off by default (§6.9).
@@ -907,3 +909,4 @@ Where the first build differs from the sections above, and why:
   - Forever has no flying mounts. → The Flying trigger was removed entirely. Global DB migration 4 strips it from saved custom rules, and character DB migration 2 removes its restore delay.
   - The Rider of the Plaguelands pieces were found. → Added as a built-in set.
 - **Desert areas:** Westfall counts (tested in game). → Added to the default desert group, with a migration for existing settings (§5.5).
+- **Swim gear:** the Azure Silk Belt (7052) does exist in Forever, and the new Cloak of Hermitic Bliss (273084) gives +33% swim speed with a −25% land-speed penalty. → Both are built in with the Swimming trigger (§3.4). Discovery now ignores speed *penalty* lines ("reduced", "decreased", "slow"), which were being read as speed bonuses.

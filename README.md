@@ -28,6 +28,8 @@ A fork of **[AutoCarrot](https://www.curseforge.com/members/kebabstorm/projects)
 | The Desert Rose | +7% mount speed | Mounted, in *Desert areas* |
 | Wintersaber Hide Lined Gloves | +6% while mounted | Mounted, in Winterspring |
 | Riding Skill glove enchant (#930), Mithril Spurs boot enchant (#464) | Mount speed | Mounted. Matched by **enchant**, so Forever's plain "Riding Gloves" item (no speed) is never used |
+| Azure Silk Belt | +15% swim speed | While swimming. Bind on Equip: wear it once so AutoCarrot can swap it |
+| Cloak of Hermitic Bliss | +33% swim speed (and −25% movement speed on land) | While swimming only, so the land penalty never applies |
 | Agamaggan's Clutch | +3% movement speed | Whenever AutoCarrot is on, in The Barrens, Thousand Needles, Razorfen Kraul and Razorfen Downs |
 | Blessing of Kalimdor set (any 2 pieces) | +5% movement speed | Whenever AutoCarrot is on, in The Barrens and Stonetalon Mountains |
 | Rider of the Plaguelands set (any 2 pieces) | +5% while mounted | Mounted, in Eastern and Western Plaguelands. The ring and cloak are preferred over the sword |
@@ -35,7 +37,7 @@ A fork of **[AutoCarrot](https://www.curseforge.com/members/kebabstorm/projects)
 
 **Desert areas** defaults to Tanaris, Silithus, Desolace and Westfall. Desolace and Westfall are confirmed in game. Blizzard doesn't publish the list, so add or remove zones in the options as you test them.
 
-None of 3.01's Riding Crop, Skybreaker Whip, swim belt or swim helm exist in Forever, and Forever has no flying mounts.
+3.01's Riding Crop, Skybreaker Whip and swim helm don't exist in Forever, and Forever has no flying mounts.
 
 ## Install
 

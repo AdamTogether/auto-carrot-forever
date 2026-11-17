@@ -432,10 +432,11 @@ local LEGACY_BUILTINS = {
     ridinggloves = "ridingSkill",   -- 3.01 name for the enchant #930 rule
     mithrilspurs = "mithrilSpurs",
     carrot = "carrot",
+    swimbelt = "azureSilkBelt",     -- 3.01 name; the Azure Silk Belt exists in Forever
 }
 
 -- 3.01 options whose items do not exist in Forever.
-local REMOVED_BUILTINS = { swimbelt = "Swim belt", swimhelm = "Swim helm" }
+local REMOVED_BUILTINS = { swimhelm = "Swim helm" }
 
 local function parseTriggers(text)
     if not text or text == "" then return nil end
