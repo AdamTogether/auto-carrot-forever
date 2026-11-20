@@ -35,7 +35,7 @@ A fork of **[AutoCarrot](https://www.curseforge.com/members/kebabstorm/projects)
 | Rider of the Plaguelands set (any 2 pieces) | +5% while mounted | Mounted, in Eastern and Western Plaguelands. The ring and cloak are preferred over the sword |
 | Staff of Westfall, Forsaken Greataxe, Gnarled Necromancer's Staff | +2% movement speed | Whenever AutoCarrot is on, in their zones. **Off by default**: putting your real weapon back at the start of a fight costs a global cooldown |
 
-**Desert areas** defaults to Tanaris, Silithus, Desolace and Westfall. Desolace and Westfall are confirmed in game. Blizzard doesn't publish the list, so add or remove zones in the options as you test them.
+**Desert areas** defaults to the zones players have confirmed: Tanaris, Silithus, Desolace, Thousand Needles, The Barrens, Durotar, Orgrimmar, Badlands, Blasted Lands and the Zul'Farrak dungeon, plus Westfall. Blizzard doesn't publish the list, so add or remove zones in the options as you test them.
 
 3.01's Riding Crop, Skybreaker Whip and swim helm don't exist in Forever, and Forever has no flying mounts.
 

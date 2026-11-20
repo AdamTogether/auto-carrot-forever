@@ -300,7 +300,7 @@ end
 --------------------------------------------------------------------------------
 
 local GLOBAL_DEFAULTS = {
-    version = 4,
+    version = 5,
     nextRuleId = 1,
     custom = {},
     ignoredSuggestions = {},
@@ -376,6 +376,13 @@ local GLOBAL_MIGRATIONS = {
     [4] = function(db)
         for _, c in ipairs(db.custom or {}) do
             if c.triggers then c.triggers.flying = nil end
+        end
+    end,
+    -- 5: more Desert areas confirmed by players.
+    [5] = function(db)
+        for _, zone in ipairs({ "Zul'Farrak", "Thousand Needles", "The Barrens", "Durotar",
+            "Orgrimmar", "Badlands", "Blasted Lands" }) do
+            addDefaultZone(db, "desert", zone)
         end
     end,
 }

@@ -55,7 +55,14 @@ ns.TWO_HAND_LOCS = { INVTYPE_2HWEAPON = true }
 -- Zones are matched by name (and map ID once captured in game), because map
 -- IDs on the Forever client are not known yet.
 ns.ZONE_GROUP_DEFAULTS = {
-    desert = { { name = "Tanaris" }, { name = "Silithus" }, { name = "Desolace" }, { name = "Westfall" } },
+    -- Confirmed by players (The Desert Rose works there), plus Westfall.
+    -- Names match case-insensitively, ignore a leading "The", and include
+    -- dungeon names (Zul'Farrak counts inside the instance).
+    desert = {
+        { name = "Tanaris" }, { name = "Silithus" }, { name = "Desolace" }, { name = "Westfall" },
+        { name = "Zul'Farrak" }, { name = "Thousand Needles" }, { name = "The Barrens" },
+        { name = "Durotar" }, { name = "Orgrimmar" }, { name = "Badlands" }, { name = "Blasted Lands" },
+    },
 }
 
 local function zones(...)
