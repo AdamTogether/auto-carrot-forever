@@ -157,7 +157,7 @@ end
 
 function Engine:BuildRules()
     local rules, byId, customKeys = {}, {}, {}
-    for i, c in ipairs(ns.gdb.custom) do
+    for i, c in ipairs(ns.CustomRules()) do
         local r = {
             id = "custom:" .. c.id,
             customId = c.id,
@@ -1179,7 +1179,7 @@ function Engine:AddCustomRule(spec)
         label = label,
     }
     gdb.nextRuleId = gdb.nextRuleId + 1
-    table.insert(gdb.custom, entry)
+    table.insert(ns.CustomRules(), entry) -- ids come from the account-wide counter, so they never collide
     ns.Discovery:Forget(match)
     self:OnSettingsChanged()
     return entry
@@ -1222,14 +1222,45 @@ function Engine:AddSetRule(spec)
         label = spec.label,
     }
     gdb.nextRuleId = gdb.nextRuleId + 1
-    table.insert(gdb.custom, entry)
+    table.insert(ns.CustomRules(), entry) -- ids come from the account-wide counter, so they never collide
     for _, p in ipairs(pieces) do ns.Discovery:Forget({ itemID = p.itemID }) end
     self:OnSettingsChanged()
     return entry
 end
 
+-- "Character specific" in the item editor (DESIGN.md §5.7).
+-- on:  this character uses its own list. The first time, it starts as a copy
+--      of the shared list (with fresh ids), so the gear doesn't change.
+-- off: back to the shared list; the character's own list is kept for later.
+function Engine:SetCharacterCustom(on)
+    local db, gdb = ns.db, ns.gdb
+    if (db.characterCustom and true or false) == (on and true or false) then return end
+    if on then
+        if #db.custom == 0 then
+            for _, c in ipairs(gdb.custom) do
+                local copy = CopyTable(c)
+                copy.id = gdb.nextRuleId
+                gdb.nextRuleId = gdb.nextRuleId + 1
+                table.insert(db.custom, copy)
+            end
+            ns.Print("This character now has its own custom items, starting as a copy of your shared list.")
+        else
+            ns.Print("This character now uses its own custom items again.")
+        end
+        db.characterCustom = true
+    else
+        db.characterCustom = false
+        ns.Print("This character now uses the custom items shared by all your characters. " ..
+            "Its own list is kept in case you switch back.")
+    end
+    wipe(state.failed)
+    wipe(state.failures)
+    wipe(state.failedAt)
+    self:OnSettingsChanged()
+end
+
 function Engine:FindCustom(id)
-    for i, c in ipairs(ns.gdb.custom) do
+    for i, c in ipairs(ns.CustomRules()) do
         if c.id == id then return c, i end
     end
 end
@@ -1237,7 +1268,7 @@ end
 function Engine:RemoveCustomRule(id)
     local _, index = self:FindCustom(id)
     if not index then return false end
-    table.remove(ns.gdb.custom, index)
+    table.remove(ns.CustomRules(), index)
     state.failed["custom:" .. id] = nil
     state.failures["custom:" .. id] = nil
     self:OnSettingsChanged()
@@ -1249,7 +1280,7 @@ function Engine:RemoveCustomRulesMatching(target)
     local parsed = Planner.ParseItemString(target)
     local number = tonumber(target)
     local ids = {}
-    for _, c in ipairs(ns.gdb.custom) do
+    for _, c in ipairs(ns.CustomRules()) do
         local hit
         local probe = parsed or (number and { itemID = number, enchantID = 0 })
         if c.kind == "set" then
@@ -1270,7 +1301,7 @@ function Engine:RemoveCustomRulesMatching(target)
 end
 
 function Engine:MoveCustomRule(id, delta)
-    local list = ns.gdb.custom
+    local list = ns.CustomRules()
     local _, i = self:FindCustom(id)
     local j = i and i + delta
     if not j or j < 1 or j > #list then return end

@@ -16,7 +16,7 @@ A fork of **[AutoCarrot](https://www.curseforge.com/members/kebabstorm/projects)
 - **Your own items.**
   - Add any armor, ring, trinket, cloak or weapon, any item carrying a given enchant, or a whole set.
   - Choose when it's worn (mounted, swimming, underwater, resting, or **Always**, meaning whenever AutoCarrot is turned on), which slot it goes in and which zones it works in.
-  - Custom items are shared by all your characters.
+  - Custom items are shared by all your characters by default. Tick **Character specific** in the item editor to give one character its own list (it starts as a copy of the shared one).
 - **Speed-item suggestions.** Items in your bags whose tooltip mentions mount, swim or movement speed are suggested, with **[Add]** links in chat.
 - **Live speed readout.** Hover the minimap or toggle button to see your current, mounted or run, and swim speed. It updates every 0.5 seconds, and only while hovered.
 
@@ -57,7 +57,8 @@ A fork of **[AutoCarrot](https://www.curseforge.com/members/kebabstorm/projects)
   - right-click opens the item editor
   - Shift-click opens the options
   - drag to move it around the minimap
-- **Toggle button** (shown by default): the carrot button turns AutoCarrot on (green) or off (red). Turning it off puts your normal gear back, including items set to Always. Right-click opens the editor. Hold **Alt** and drag to move it; its position is remembered without Edit Mode. Hide it in the options or with `/ac button 0`.
+- **Key binding:** set a key to turn AutoCarrot on or off on the options page, or under Esc → Options → Keybindings → AddOns.
+- **Toggle button** (shown by default): the carrot button turns AutoCarrot on (green) or off (red). Turning it off puts your normal gear back, including items set to Always. Right-click opens the editor, Shift-click opens the options. Hovering it (or the minimap button) shows your speed and your toggle key. Hold **Alt** and drag to move it; its position is remembered without Edit Mode. Hide it in the options or with `/ac button 0`.
 
 ## Development
 

@@ -126,6 +126,116 @@ function Page:Choice(text, tooltip, values, get, set)
     self.y = self.y + ROW_H
 end
 
+-- Key-binding capture for a Bindings.xml command. Left-click, then press a
+-- key (with any Alt/Ctrl/Shift); Esc cancels; right-click clears. Bindings
+-- can't be changed in combat.
+local MODIFIER_KEYS = {
+    LSHIFT = true, RSHIFT = true, LCTRL = true, RCTRL = true,
+    LALT = true, RALT = true, LMETA = true, RMETA = true, UNKNOWN = true,
+}
+
+local function keyText(key)
+    return GetBindingText and GetBindingText(key) or key
+end
+
+-- What the button shows: AutoCarrot's own key, or a key the player set in
+-- Esc > Options > Keybindings (that one is the game's, we never touch it).
+local function bindingText(command)
+    if ns.gdb.toggleKey then return keyText(ns.gdb.toggleKey) end
+    local gameKey = GetBindingKey(command)
+    if gameKey then return keyText(gameKey) .. " |cff808080(game)|r" end
+    return "|cff808080Not bound|r"
+end
+
+-- The key is stored in AutoCarrot's settings and applied as an *override*
+-- binding (UI.ApplyToggleKey). It never calls SetBinding/SaveBindings: saving
+-- the game's binding set from an addon (SaveBindings(GetCurrentBindingSet()))
+-- can write the wrong account/character set and wipe keybinds on other
+-- characters, which is what 4.0.15's first version did.
+local function setBinding(command, key)
+    if key then
+        local previous = GetBindingAction(key)
+        if previous and previous ~= "" and previous ~= command then
+            local name = _G["BINDING_NAME_" .. previous] or previous
+            ns.Print(keyText(key) .. " also does \"" .. name .. "\". While it's AutoCarrot's key, it turns AutoCarrot on/off instead " ..
+                "(your game key bindings are not changed; clear it here to get the old action back).")
+        end
+    end
+    ns.gdb.toggleKey = key
+    UI.ApplyToggleKey()
+end
+
+function Page:Keybind(text, tooltip, command)
+    self:Label(text, tooltip)
+    local button = UI.CreateButton(self.content, "", 170, nil)
+    button:SetPoint("TOPLEFT", CONTROL_X, -(self.y + 4))
+    button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    -- Keyboard capture exists ONLY while waiting for a key. Giving a frame an
+    -- OnKeyDown script switches its keyboard input on, and a shown frame with
+    -- keyboard input that doesn't propagate swallows every keystroke in the
+    -- game. In 4.0.15's first build the handler was set at creation, which
+    -- blocked all keys from login until this button was right-clicked.
+    button:EnableKeyboard(false)
+
+    local function show()
+        button:SetText(button.listening and "|cffffd100Press a key...|r" or bindingText(command))
+    end
+    local onKeyDown
+    local function stopListening()
+        button.listening = false
+        button:SetScript("OnKeyDown", nil)
+        button:EnableKeyboard(false)
+        show()
+    end
+    onKeyDown = function(self, key)
+        if MODIFIER_KEYS[key] then return end -- wait for the real key
+        if key == "ESCAPE" or InCombatLockdown() then
+            stopListening()
+            return
+        end
+        local combo = (IsAltKeyDown() and "ALT-" or "") .. (IsControlKeyDown() and "CTRL-" or "") ..
+            (IsShiftKeyDown() and "SHIFT-" or "") .. key
+        stopListening()
+        setBinding(command, combo)
+        show()
+    end
+    button:SetScript("OnClick", function(self, mouse)
+        if self.listening then
+            stopListening() -- a second click cancels
+            return
+        end
+        if mouse == "RightButton" then
+            setBinding(command, nil)
+            show()
+            return
+        end
+        if InCombatLockdown() then
+            ns.Print("The toggle key can't be changed during combat.")
+            return
+        end
+        self.listening = true
+        self:SetScript("OnKeyDown", onKeyDown)
+        self:EnableKeyboard(true)
+        self:SetPropagateKeyboardInput(false) -- this one key goes to us, not the game
+        show()
+    end)
+    -- Never leave capture on: closing the options, combat, or losing the page.
+    button:SetScript("OnHide", function(self)
+        if self.listening then stopListening() end
+    end)
+    ns:On("PLAYER_REGEN_DISABLED", function()
+        if button.listening then stopListening() end
+    end)
+    UI.SetTooltip(button, function(tt)
+        tt:SetText(text, 1, 1, 1)
+        tt:AddLine("Left-click, then press a key (Alt, Ctrl and Shift combinations work). Esc or a second click cancels.", nil, nil, nil, true)
+        tt:AddLine("Right-click to clear it.", nil, nil, nil, true)
+        tt:AddLine("Shared by all your characters. It doesn't change your game key bindings.", 0.6, 0.8, 1, true)
+    end)
+    refreshers[#refreshers + 1] = show
+    self.y = self.y + ROW_H
+end
+
 function Page:Button(text, buttonText, tooltip, onClick)
     self:Label(text, tooltip)
     local button = UI.CreateButton(self.content, buttonText, 170, onClick)
@@ -142,6 +252,10 @@ local function Build()
     local db = ns.db
 
     local panel = CreateFrame("Frame")
+    -- Hidden until the Settings panel shows it: an unparented frame is "shown"
+    -- from creation, so its controls could otherwise receive input (and its
+    -- OnShow refresh would never fire on first open).
+    panel:Hide()
     panel.name = TITLE
 
     local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalHuge")
@@ -218,6 +332,9 @@ local function Build()
     end
 
     page:Header("Interface")
+    page:Keybind("Key to turn AutoCarrot on/off",
+        "Press this key to turn AutoCarrot on or off. Turning it off puts your normal gear back.",
+        "AUTOCARROTFOREVER_TOGGLE")
     page:Checkbox("Show toggle button", "A movable on/off button. Hold Alt and drag it to move it.",
         function() return db.button.shown end,
         function(v) db.button.shown = v end)
@@ -262,6 +379,9 @@ local function Build()
     panel.OnCommit, panel.okay = function() end, function() end
     panel.OnDefault, panel.default = function() end, function() end
     panel.cancel = function() end
+
+    -- Bindings can also change in Esc > Options > Keybindings.
+    ns:On("UPDATE_BINDINGS", function() if panel:IsVisible() then for _, fn in ipairs(refreshers) do fn() end end end)
 
     -- Slash commands and other UI change settings too: keep the page current.
     ns:On("AC_STATUS", function() if panel:IsVisible() then for _, fn in ipairs(refreshers) do fn() end end end)

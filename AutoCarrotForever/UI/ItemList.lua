@@ -60,7 +60,7 @@ local function CreateWindow()
 
     local title = f.TitleText or f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     if not f.TitleText then title:SetPoint("TOP", 0, -6) end
-    title:SetText("AutoCarrot Forever - Custom Items (shared by all your characters)")
+    f.title = title
     return f
 end
 
@@ -196,7 +196,21 @@ local function CreateAddBar(f)
 
     local message = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     message:SetPoint("TOPLEFT", drop, "BOTTOMLEFT", 0, -28)
-    message:SetPoint("RIGHT", f, "RIGHT", -20, 0)
+
+    -- Character specific (DESIGN.md §5.7). Unticked = the shared list.
+    local charBox = UI.CreateCheck(f, "Character specific", function(tt)
+        tt:SetText("Character specific", 1, 1, 1)
+        tt:AddLine("Off (default): the custom items below are shared by all your characters.", nil, nil, nil, true)
+        tt:AddLine("On: this character keeps its own list. The first time, it starts as a copy of the shared list; " ..
+            "turning it off again goes back to the shared list and keeps this character's list for later.", nil, nil, nil, true)
+        tt:AddLine("Zone groups, ignored suggestions and the toggle key are always shared.", 0.6, 0.8, 1, true)
+    end, function(v)
+        ns.Engine:SetCharacterCustom(v)
+        setMessage(v and "Editing this character's own custom items." or "Editing the custom items shared by all your characters.")
+    end)
+    charBox:SetPoint("TOPRIGHT", f, "TOPRIGHT", -150, -104)
+    f.charBox = charBox
+    message:SetPoint("RIGHT", charBox, "LEFT", -12, 0)
     message:SetJustifyH("LEFT")
     f.message = message
 end
@@ -681,7 +695,11 @@ end
 
 function UI.RefreshEditor()
     if not editor or not editor:IsShown() then return end
-    layoutList(editor.rules, ns.gdb.custom, CreateRuleRow, FillRuleRow,
+    local own = ns.db.characterCustom
+    editor.title:SetText("AutoCarrot Forever - Custom Items " ..
+        (own and ("(" .. (UnitName("player") or "this character") .. " only)") or "(shared by all your characters)"))
+    editor.charBox:SetChecked(own and true or false)
+    layoutList(editor.rules, ns.CustomRules(), CreateRuleRow, FillRuleRow,
         "No custom items yet. Add one above, or accept a suggestion below.")
     layoutList(editor.suggestions, ns.Discovery:List(), CreateSuggestionRow, FillSuggestionRow,
         "No suggestions. Speed items found in your bags will show up here.")

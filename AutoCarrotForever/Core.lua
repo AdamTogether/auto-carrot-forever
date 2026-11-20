@@ -325,6 +325,10 @@ local CHAR_DEFAULTS = {
     saved = {},
     slotOwner = {},
     lastSlot = {},
+    -- Character-specific custom items (DESIGN.md §5.7): when characterCustom is
+    -- true this character uses its own list instead of the account-wide one.
+    characterCustom = false,
+    custom = {},
 }
 
 -- Tables holding user lists or per-slot state: never merge defaults into them.
@@ -412,6 +416,14 @@ local function InitDB()
     for key, zones in pairs(ns.ZONE_GROUP_DEFAULTS) do
         if ns.gdb.zoneGroups[key] == nil then ns.gdb.zoneGroups[key] = copy(zones) end
     end
+end
+
+-- The custom-rule list this character uses: its own when "Character specific"
+-- is ticked in the item editor, otherwise the account-wide one. Everything
+-- that reads or edits custom rules goes through here.
+function ns.CustomRules()
+    if ns.db and ns.db.characterCustom then return ns.db.custom end
+    return ns.gdb.custom
 end
 
 ns:On("ADDON_LOADED", function(name)

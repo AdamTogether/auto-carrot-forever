@@ -28,6 +28,9 @@ local PATTERNS = {
         { pattern = "movement speed", trigger = "always", kind = "movement speed" },
         { pattern = "run speed", trigger = "always", kind = "run speed" },
         { pattern = "minor speed", trigger = "always", kind = "run speed" },
+        -- Boot enchants: "Enchanted: Minor Speed Increase" (4%) and the new
+        -- "Enchanted: Speed Increase" (8%). Word order differs from "increases speed".
+        { pattern = "%f[%a]speed increase", trigger = "always", kind = "run speed" },
         { pattern = "increases speed", trigger = "always", kind = "speed" },
     },
 }
@@ -125,8 +128,10 @@ local function analyse(item, data)
             local setNeed = lower:match("^%((%d+)%)")
             local isSetLine = setNeed ~= nil or startsWith(lower, PREFIX_SET)
             -- Penalty lines ("Movement speed reduced by 25%") are not speed gear.
+            -- Not movement speed: attack/casting speed ("Attack speed increased by 5%").
             local skip = startsWith(lower, PREFIX_USE) or startsWith(lower, PREFIX_PROC)
                 or lower:find("reduc") or lower:find("decreas") or lower:find("slow")
+                or lower:find("attack speed") or lower:find("cast%a* speed")
             if isSetLine and not skip then
                 -- Set bonus (DESIGN.md §5.6): suggest a set rule.
                 for _, p in ipairs(patterns) do
@@ -220,6 +225,14 @@ function Discovery:Scan(manual)
     end
     if not ns.gdb or not ns.Engine.state.ready then return end
     covered = manual and {} or nil
+    -- "Scan now" looks again at items earlier scans decided weren't speed gear
+    -- (patterns may have been added, or the tooltip wasn't loaded yet).
+    if manual then
+        for key, result in pairs(cache) do
+            if result == false then cache[key] = nil end
+        end
+        wipe(tries)
+    end
     local found = 0
     for bag = API.FirstBag(), API.LastBag() do
         for slot = 1, API.GetBagSlots(bag) do

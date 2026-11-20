@@ -1,0 +1,8 @@
+<!-- Key binding: loaded automatically by the client (not listed in the .toc).
+     Shows under Esc > Options > Keybindings > AddOns, and can be set from the
+     AutoCarrot Forever options page. -->
+<Bindings>
+    <Binding name="AUTOCARROTFOREVER_TOGGLE" header="AUTOCARROTFOREVER" category="ADDONS">
+        AutoCarrotForever_Toggle()
+    </Binding>
+</Bindings>

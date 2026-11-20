@@ -13,17 +13,26 @@ local function statusTooltip(tt)
     end
 end
 
+-- The key that turns AutoCarrot on/off: AutoCarrot's own (options page) or
+-- one set in the game's Keybindings menu. nil if neither.
+local function toggleKeyText()
+    local key = (ns.gdb and ns.gdb.toggleKey) or GetBindingKey("AUTOCARROTFOREVER_TOGGLE")
+    if not key then return nil end
+    return GetBindingText and GetBindingText(key) or key
+end
+
 -- kind: "toggle" | "minimap" | "compartment"
 local function hints(tt, kind)
     tt:AddLine(" ")
     tt:AddLine("Left-click: turn on/off", 0.6, 0.8, 1)
     tt:AddLine("Right-click: custom item editor", 0.6, 0.8, 1)
+    tt:AddLine("Shift-click: options", 0.6, 0.8, 1)
     if kind == "minimap" then
-        tt:AddLine("Shift-click: options", 0.6, 0.8, 1)
         tt:AddLine("Drag: move around the minimap", 0.6, 0.8, 1)
     elseif kind == "toggle" then
         tt:AddLine("Alt-drag: move", 0.6, 0.8, 1)
     end
+    tt:AddLine("Toggle Keybind: " .. (toggleKeyText() or "Not bound"), 0.6, 0.8, 1)
 end
 
 -- Live speed readout (same numbers as /ac speed). Ground speed is what
@@ -83,8 +92,8 @@ local function endHover()
     GameTooltip:Hide()
 end
 
-local function onClick(button, minimapButton)
-    if minimapButton and IsShiftKeyDown() then
+local function onClick(button)
+    if IsShiftKeyDown() then
         UI.OpenSettings()
     elseif button == "RightButton" then
         UI.ToggleEditor()
@@ -174,7 +183,7 @@ local function CreateToggle()
             return
         end
         if IsAltKeyDown() then return end -- Alt is reserved for moving
-        onClick(button, false)
+        onClick(button)
     end)
     b:SetScript("OnEnter", function(self) startHover(self, "toggle", "ANCHOR_RIGHT") end)
     b:SetScript("OnLeave", endHover)
@@ -228,7 +237,7 @@ local function CreateMinimap()
     border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
     border:SetPoint("TOPLEFT")
 
-    b:SetScript("OnClick", function(_, button) onClick(button, true) end)
+    b:SetScript("OnClick", function(_, button) onClick(button) end)
     b:SetScript("OnDragStart", function(self)
         self:SetScript("OnUpdate", function()
             local mx, my = Minimap:GetCenter()
@@ -295,8 +304,46 @@ ns:On("AC_STATUS", function() UI.UpdateButtons() end)
 -- Addon compartment (TOC AddonCompartmentFunc)
 --------------------------------------------------------------------------------
 
+--------------------------------------------------------------------------------
+-- Key binding (Bindings.xml: AUTOCARROTFOREVER_TOGGLE)
+--------------------------------------------------------------------------------
+
+BINDING_HEADER_AUTOCARROTFOREVER = "AutoCarrot Forever"
+BINDING_NAME_AUTOCARROTFOREVER_TOGGLE = "Turn AutoCarrot on/off"
+
+function AutoCarrotForever_Toggle()
+    if not ns.db then return end
+    ns.Engine:SetEnabled(not ns.db.enabled)
+    ns.Print(ns.db.enabled and "|cff00ff00On|r" or "|cffff4040Off|r - normal gear goes back.")
+end
+
+-- AutoCarrot's own toggle key (AutoCarrotForeverGlobalDB.toggleKey) is an
+-- override binding: active for this session only, owned by this frame, and
+-- never written to the game's account or character binding sets. Override
+-- bindings can't be changed in combat, so a change made then waits.
+local bindOwner = CreateFrame("Frame")
+local applyPending = false
+
+function UI.ApplyToggleKey()
+    if InCombatLockdown() then
+        applyPending = true
+        return
+    end
+    applyPending = false
+    ClearOverrideBindings(bindOwner)
+    local key = ns.gdb and ns.gdb.toggleKey
+    if key then
+        SetOverrideBinding(bindOwner, false, key, "AUTOCARROTFOREVER_TOGGLE")
+    end
+end
+
+ns:On("PLAYER_LOGIN", function() UI.ApplyToggleKey() end)
+ns:On("PLAYER_REGEN_ENABLED", function()
+    if applyPending then UI.ApplyToggleKey() end
+end)
+
 function AutoCarrotForever_OnCompartmentClick(_, button)
-    onClick(button, false)
+    onClick(button)
 end
 
 function AutoCarrotForever_OnCompartmentEnter(_, frame)

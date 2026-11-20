@@ -161,7 +161,8 @@ AutoCarrotForever/
   UI/Settings.lua  Settings panel
   UI/ZoneGroups.lua zone-groups section of the options page (collapsible group/zone lists)
   UI/ItemList.lua  custom item editor + suggestions list
-  UI/Buttons.lua   toggle button + minimap button
+  UI/Buttons.lua   toggle button + minimap button + key-binding handler
+  Bindings.xml     AUTOCARROTFOREVER_TOGGLE key binding (auto-loaded, not in the .toc)
 ```
 
 - Every file starts with `local ADDON, ns = ...`. Modules attach to `ns` (`ns.Engine`, `ns.UI`, …).
@@ -352,6 +353,16 @@ A **set rule** swaps several items together:
 - **Planning is all or nothing.** The planner places up to `need` pieces, worn pieces first, so a half-worn set is completed rather than reshuffled. Each piece goes in its own slot, with the usual slot choice for rings and trinkets. If fewer than `need` pieces fit, because other rules or locked slots took their slots, **none** are placed. Half a set gives no bonus and would only cost stats.
 - **Owner and restore:** every slot a set fills is owned by the set rule's id. Restoring works slot by slot, as usual.
 - **Creating sets:** use `/ac addset <need> <link> <link> [...] [trigger]`, or accept a set suggestion (§7.2). Set rules show in the editor as "Set 2 of: A, B, C". Slot is fixed per piece; trigger, zones and priority can be edited like any other rule.
+
+### 5.7 Character-specific custom items
+
+Custom rules are **shared by all characters** by default (`AutoCarrotForeverGlobalDB.custom`). The item editor has a **Character specific** checkbox, **unticked by default**:
+
+- **Ticked:** this character uses its own list in `AutoCarrotForeverDB.custom` (per character, flag `characterCustom = true`). `ns.CustomRules()` returns the active list, and everything that reads or changes custom rules uses it: the engine, the editor, Discovery's [Add], and `/ac add/addenchant/addset/remove/list`.
+- **First time ticked:** the character's list starts as a **copy of the shared list**, so gear doesn't change on the spot. Copies get fresh ids from the account-wide `nextRuleId`. Rule ids are therefore unique across all lists, and per-character state keyed by rule id (`slotOwner`, `lastSlot`, failure flags) can't confuse a shared rule with a character rule. If an item is worn under the old rule's id, the next `Refresh()` hands the slot to the new rule without swapping.
+- **Unticked again:** back to the shared list. The character's own list is **kept**, so ticking again brings it back unchanged.
+- **Always shared:** zone groups, ignored suggestions and the toggle key. They describe the world or the player, not one character's gear.
+- The editor title reads "(shared by all your characters)" or "(<name> only)".
 
 ---
 
@@ -569,6 +580,8 @@ Weapons follow different rules from armor. **In Forever, weapons can be swapped 
 Read `C_TooltipInfo.GetBagItem(bag, slot)` / `GetInventoryItem("player", slot)` and look at each `lines[i].leftText` (lower-cased).
 
 1. **Only passive effects count.** Lines that start with the localized **Use:** prefix (`ITEM_SPELL_TRIGGER_ONUSE`) or **Chance on hit:** prefix (`ITEM_SPELL_TRIGGER_ONPROC`) are **ignored**. A trinket whose *on-use* effect gives movement speed, such as Nifty Stopwatch or Insignia-style items, gains nothing from being swapped on automatically. Lines with the **Equip:** prefix (`ITEM_SPELL_TRIGGER_ONEQUIP`) are strong matches. Unprefixed green lines (enchant lines such as "Minor Speed" or "Mithril Spurs") are weak matches.
+1b. **Not movement speed:** lines about speed *penalties* ("reduced", "decreased", "slow") or attack and casting speed are ignored.
+1c. **"Scan now" re-checks** items that earlier scans this session decided weren't speed gear, so new patterns and late-loading tooltips are picked up without a `/reload`.
 2. **Set-bonus lines** ("(2) Set: …") become **set suggestions** (§5.6). `n` is the number of pieces needed. The pieces come from the item's set ID (`GetItemInfo` return 16 with `C_LootJournal.GetItemSetItems`) when the client provides them. Otherwise the suggestion asks the player to add the set with `/ac addset`.
 2b. **Zone lists** are read from the text after the percentage: "…by 3% in The Barrens, Thousand Needles, Razorfen Kraul, and Razorfen Downs." becomes four zones. "Eastern and Western Plaguelands" becomes "Eastern Plaguelands" and "Western Plaguelands" (`Planner.SplitZones`). "…in Desert areas" becomes a zone group (§5.5). Zone names are compared case-insensitively and ignore a leading "The", and instance names count, so "the Deadmines" matches inside the dungeon.
 3. Patterns:
@@ -585,6 +598,7 @@ ns.SPEED_PATTERNS = {
   { pattern = "movement speed",         trigger = "always"    },
   { pattern = "run speed",              trigger = "always"    },
   { pattern = "minor speed",            trigger = "always"    },
+  { pattern = "%f[%a]speed increase",   trigger = "always"    }, -- "Enchanted: Speed Increase" (8% boot enchant)
   { pattern = "increases speed",        trigger = "always"    },
 }
 ```
@@ -628,6 +642,7 @@ Everything lives on this one scrolling page:
 | Checkbox | Never swap out on-use trinkets (§6.7) |
 | Stepper `< 1.0 s >` (0–5 s, step 0.5) | Restore delay: mounted / swimming / underwater |
 | Section header | Interface |
+| Key-capture button | **Key to turn AutoCarrot on/off**. Left-click, then press a key (Alt/Ctrl/Shift combinations work); Esc cancels; right-click clears. The key is stored account-wide in `AutoCarrotForeverGlobalDB.toggleKey` and applied each session as an **override binding** (`SetOverrideBinding(owner, false, key, "AUTOCARROTFOREVER_TOGGLE")` at `PLAYER_LOGIN`, or after combat if changed during it). It **never** calls `SetBinding`/`SaveBindings`, because saving the game's binding set from an addon is a known way to write the wrong account or character set (see the ItemRack and WoWInterface reports). **Keyboard capture exists only while waiting for a key:** the `OnKeyDown` script is set when the button is clicked and removed, with `EnableKeyboard(false)`, on the key, Esc, a second click, `OnHide` or combat. In the first 4.0.15 build the handler was set when the page was built. Setting `OnKeyDown` turns keyboard input on, and the unparented canvas page counted as shown from creation, so that button swallowed **every keystroke in the game** from login until it was right-clicked. That was the real cause of "no keybinds work on my other character", not `SaveBindings`. The page is now created hidden (`panel:Hide()`); the Settings panel shows it when opened. `Bindings.xml` still declares the command, so players can also bind it under Esc → Options → Keybindings → AddOns; the game manages that binding itself |
 | Checkbox | Show toggle button (**on by default**) |
 | Stepper (0.5–2.0, step 0.1) | Toggle button scale |
 | Checkbox | Show minimap button |
@@ -704,8 +719,8 @@ Keeps the 3.01 behaviour, with these changes:
 - A plain `Button` with the carrot icon (134010). It deliberately does **not** use `ActionButtonTemplate`: on Forever that template's scripts swallowed Alt-drag.
 - **Alt + left mouse button moves it.** This is handled in `OnMouseDown`/`OnMouseUp`, not drag events, and the mouse-up that ends a move does not toggle the addon. The position is saved in `AutoCarrotForeverDB.button.pos`, not the client layout cache (`SetUserPlaced(false)`), so Forever's Edit Mode never resets it and the player never needs Edit Mode for it.
 - Green overlay when on, red when off, **yellow when a swap is pending** (combat, cast, bags full).
-- Left-click turns the addon on or off. Right-click opens the editor.
-- Its tooltip lists the active rules, what each slot has swapped in, and any pending or failed state with the reason.
+- Left-click turns the addon on or off. Right-click opens the editor. **Shift-click opens the options** (same as the minimap button).
+- Its tooltip lists the active rules, what each slot has swapped in, and any pending or failed state with the reason. The toggle, minimap and compartment tooltips end with a **"Toggle Keybind: ALT-C"** line ("Not bound" when none is set), below the click and drag hints.
 - If the "Swap now" fallback is ever needed (§6.6), this button becomes a secure button. Its attributes can only be changed out of combat.
 
 **Hover tooltip** (toggle button, minimap button and addon-compartment entry share it):
