@@ -106,6 +106,15 @@ ns.BUILTINS = {
     -- 25%.": only ever worn while swimming, never on land.
     { id = "cloakOfHermiticBliss", name = "Cloak of Hermitic Bliss", match = { itemID = 273084 }, slots = { 15 },
       trigger = "swimming", priority = 100 },
+    -- Run and swim speed, worn whenever AutoCarrot is on. Priority 90: below
+    -- the mount-speed items (100-110), so while mounted Mithril Spurs boots and
+    -- the Carrot/Desert Rose win their slots; on foot or swimming these go on.
+    -- "Equip: Minor increase to running and swimming speed. Does not stack with similar effects."
+    { id = "spryBoots", name = "Spry Boots", match = { itemID = 18411 }, slots = { 8 },
+      trigger = "always", priority = 90 },
+    -- "Equip: Increases running and swimming speed by 5%."
+    { id = "hyjalPostalClasp", name = "Hyjal Postal Clasp", match = { itemID = 260308 }, slots = { 13, 14 },
+      trigger = "always", priority = 90 },
     -- "Equip: Increases movement speed by 3% in The Barrens, Thousand Needles, Razorfen Kraul, and Razorfen Downs."
     { id = "agamaggansClutch", name = "Agamaggan's Clutch", match = { itemID = 6693 }, slots = { 11, 12 },
       trigger = "always", priority = 100,

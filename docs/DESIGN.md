@@ -131,6 +131,8 @@ Results so far:
 | Swim helm (10506) | **No** (confirmed) | Removed. The underwater trigger stays for custom items |
 | **Azure Silk Belt (7052)**, waist, Bind on Equip: "Increases swim speed by 15%." | **Yes** (found in game; first wrongly reported missing) | Built-in: swimming. Like every built-in it never binds the item, so an unbound belt is skipped with one message until worn once |
 | **Cloak of Hermitic Bliss (273084)**, back, Bind on Pickup, Kresh in Wailing Caverns: "Swim speed increased by 33%." **and** "Movement speed reduced by 25%." | **Yes** (found in game) | Built-in: **swimming only**, so the land-speed penalty never applies outside water. The swim restore delay (1 s) stops flapping at the surface |
+| **Spry Boots (18411)**, feet, Bind on Pickup: "Minor increase to running and swimming speed. Does not stack with similar effects." | Yes (player report) | Built-in: **always**, priority **90**, below mount-speed rules, so Mithril Spurs boots win the feet slot while mounted |
+| **Hyjal Postal Clasp (260308)**, trinket, Bind on Pickup: "Increases running and swimming speed by 5%." | Yes (player report) | Built-in: **always**, priority **90**. While mounted, mount trinkets (Desert Rose 110, Carrot 100) fill the speed-trinket slots first. On foot it holds a trinket slot whenever AutoCarrot is on, including in combat. It can be unticked in options or kept off a slot with the trinket locks |
 | Carrot on a Stick (11122) | Assumed yes | Built-in |
 | **Wintersaber Hide Lined Gloves (284266)**, hands, level 54: "Increases movement speed while mounted by 6% in Winterspring." | Yes (item databases) | Built-in: mounted + Winterspring, priority 110 (beats the 2% glove enchant) |
 | **Agamaggan's Clutch (6693)**, ring, level 30: "Increases movement speed by 3% in The Barrens, Thousand Needles, Razorfen Kraul, and Razorfen Downs." | Yes (item databases) | Built-in: always + those zones |
@@ -599,6 +601,8 @@ ns.SPEED_PATTERNS = {
   { pattern = "run speed",              trigger = "always"    },
   { pattern = "minor speed",            trigger = "always"    },
   { pattern = "%f[%a]speed increase",   trigger = "always"    }, -- "Enchanted: Speed Increase" (8% boot enchant)
+  { pattern = "running and swimming speed", trigger = "always" }, -- checked before the swim-only pattern
+  { pattern = "running speed",          trigger = "always"    },
   { pattern = "increases speed",        trigger = "always"    },
 }
 ```

@@ -30,6 +30,8 @@ A fork of **[AutoCarrot](https://www.curseforge.com/members/kebabstorm/projects)
 | Riding Skill glove enchant (#930), Mithril Spurs boot enchant (#464) | Mount speed | Mounted. Matched by **enchant**, so Forever's plain "Riding Gloves" item (no speed) is never used |
 | Azure Silk Belt | +15% swim speed | While swimming. Bind on Equip: wear it once so AutoCarrot can swap it |
 | Cloak of Hermitic Bliss | +33% swim speed (and −25% movement speed on land) | While swimming only, so the land penalty never applies |
+| Spry Boots | Minor run and swim speed | Whenever AutoCarrot is on. Mithril Spurs boots take the feet slot instead while mounted |
+| Hyjal Postal Clasp | +5% run and swim speed | Whenever AutoCarrot is on, so it uses a trinket slot even in combat. Mount-speed trinkets take priority while mounted. Untick it in options or lock a trinket slot if you'd rather not |
 | Agamaggan's Clutch | +3% movement speed | Whenever AutoCarrot is on, in The Barrens, Thousand Needles, Razorfen Kraul and Razorfen Downs |
 | Blessing of Kalimdor set (any 2 pieces) | +5% movement speed | Whenever AutoCarrot is on, in The Barrens and Stonetalon Mountains |
 | Rider of the Plaguelands set (any 2 pieces) | +5% while mounted | Mounted, in Eastern and Western Plaguelands. The ring and cloak are preferred over the sword |

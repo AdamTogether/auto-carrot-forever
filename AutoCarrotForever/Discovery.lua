@@ -22,6 +22,10 @@ local PATTERNS = {
         -- %f[%a] stops "amount ... speed" from matching.
         { pattern = "%f[%a]mount%a* speed", trigger = "mounted", kind = "mount speed" },
         { pattern = "riding speed", trigger = "mounted", kind = "mount speed" },
+        -- Run AND swim speed ("running and swimming speed") is worn always, not
+        -- just in water, so it must win over the swim-only pattern below.
+        { pattern = "%f[%a]running and swimming speed", trigger = "always", kind = "run and swim speed" },
+        { pattern = "%f[%a]running speed", trigger = "always", kind = "run speed" },
         { pattern = "%f[%a]swim%a* speed", trigger = "swimming", kind = "swim speed" },
         { pattern = "underwater breathing", trigger = "submerged", kind = "underwater effect" },
         { pattern = "underwater", trigger = "submerged", kind = "underwater effect" },
